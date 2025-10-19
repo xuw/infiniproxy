@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3:*)",
+      "Bash(pip3 install:*)",
+      "Bash(source:*)",
+      "Bash(pip install:*)",
+      "Bash(python test_api.py:*)",
+      "Bash(pytest:*)",
+      "Bash(python test_e2e.py:*)",
+      "Bash(pkill:*)",
+      "Bash(lsof:*)",
+      "Bash(xargs kill -9)",
+      "Bash(kill:*)",
+      "Bash(curl:*)",
+      "mcp__context7__resolve-library-id",
+      "mcp__context7__get-library-docs",
+      "WebSearch",
+      "WebFetch(domain:platform.openai.com)",
+      "WebFetch(domain:help.openai.com)",
+      "Bash(chmod:*)",
+      "Bash(python proxy_server.py:*)",
+      "Bash(python:*)",
+      "Bash(git init:*)",
+      "Bash(git add:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
