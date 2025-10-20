@@ -4,8 +4,9 @@ A local proxy server that translates between OpenAI-compatible API format and Cl
 
 ## Features
 
-- ✅ Translates Claude API requests to OpenAI format
-- ✅ Translates OpenAI responses back to Claude format
+- ✅ **Dual API support**: Both Claude API format and OpenAI API format
+- ✅ **Translation mode**: Claude API requests → OpenAI backend (with translation)
+- ✅ **Pass-through mode**: OpenAI API requests → OpenAI backend (no translation)
 - ✅ Handles system messages properly
 - ✅ Supports multi-turn conversations
 - ✅ Handles Claude's content blocks
@@ -16,10 +17,22 @@ A local proxy server that translates between OpenAI-compatible API format and Cl
 
 ## Architecture
 
+The proxy supports two modes:
+
+### Translation Mode (Claude API → OpenAI Backend)
 ```
 Claude Code → HTTP (Claude Format) → Proxy Server → HTTP (OpenAI Format) → OpenAI-Compatible Backend
-                                           ↓
+                                      /v1/messages
+                                           ↓ (translate)
 Claude Code ← HTTP (Claude Format) ← Proxy Server ← HTTP (OpenAI Format) ← OpenAI-Compatible Backend
+```
+
+### Pass-Through Mode (OpenAI API → OpenAI Backend)
+```
+OpenAI Client → HTTP (OpenAI Format) → Proxy Server → HTTP (OpenAI Format) → OpenAI-Compatible Backend
+                                        /v1/chat/completions
+                                             ↓ (pass-through)
+OpenAI Client ← HTTP (OpenAI Format) ← Proxy Server ← HTTP (OpenAI Format) ← OpenAI-Compatible Backend
 ```
 
 ## Installation
@@ -83,6 +96,52 @@ Configure Claude Code to use the proxy as its API endpoint:
 1. Set the API endpoint to: `http://localhost:8000`
 2. The proxy accepts Claude API format at `/v1/messages`
 
+### Using with OpenAI-Compatible Clients
+
+You can use the proxy with any OpenAI-compatible client or library:
+
+**Python (OpenAI SDK):**
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8000/v1",
+    api_key="any-key"  # Not used by proxy, but required by SDK
+)
+
+response = client.chat.completions.create(
+    model="glm-4.6",
+    messages=[
+        {"role": "user", "content": "Hello!"}
+    ]
+)
+```
+
+**JavaScript/TypeScript (OpenAI SDK):**
+```javascript
+import OpenAI from 'openai';
+
+const client = new OpenAI({
+    baseURL: 'http://localhost:8000/v1',
+    apiKey: 'any-key'  // Not used by proxy
+});
+
+const response = await client.chat.completions.create({
+    model: 'glm-4.6',
+    messages: [{ role: 'user', content: 'Hello!' }]
+});
+```
+
+**cURL:**
+```bash
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "glm-4.6",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+```
+
 ### API Endpoints
 
 #### `GET /`
@@ -100,13 +159,37 @@ curl http://localhost:8000/health
 ```
 
 #### `POST /v1/messages`
-Main endpoint for creating messages (Claude API format).
+Claude API endpoint (with translation to OpenAI format).
+
+This endpoint accepts Claude API format requests, translates them to OpenAI format,
+and returns responses in Claude format.
 
 ```bash
 curl -X POST http://localhost:8000/v1/messages \
   -H "Content-Type: application/json" \
   -d '{
     "model": "claude-3-5-sonnet-20241022",
+    "max_tokens": 1024,
+    "messages": [
+      {
+        "role": "user",
+        "content": "Hello!"
+      }
+    ]
+  }'
+```
+
+#### `POST /v1/chat/completions`
+OpenAI API endpoint (pass-through mode).
+
+This endpoint accepts OpenAI API format requests and passes them directly to the
+backend without translation, returning OpenAI format responses.
+
+```bash
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "glm-4.6",
     "max_tokens": 1024,
     "messages": [
       {

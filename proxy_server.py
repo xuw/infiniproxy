@@ -83,7 +83,8 @@ async def root():
         "version": "1.0.0",
         "status": "running",
         "endpoints": {
-            "messages": "/v1/messages",
+            "claude_messages": "/v1/messages (Claude API format)",
+            "openai_chat": "/v1/chat/completions (OpenAI API format - pass-through)",
             "health": "/health"
         }
     }
@@ -98,6 +99,100 @@ async def health():
         "openai_backend": config.openai_base_url,
         "openai_model": config.openai_model
     }
+
+
+@app.post("/v1/chat/completions")
+async def chat_completions(request: Request):
+    """
+    Chat completions endpoint (OpenAI API format - pass-through).
+
+    This endpoint accepts OpenAI API format requests and passes them directly
+    to the backend without translation, returning OpenAI format responses.
+    """
+    start_time = time.time()
+    request_id = None
+
+    try:
+        # Parse OpenAI request
+        openai_request = await request.json()
+
+        # Log incoming request details
+        model = openai_request.get("model", config.openai_model)
+        max_tokens = openai_request.get("max_tokens", config.max_output_tokens)
+        is_streaming = openai_request.get("stream", False)
+
+        logger.info("=" * 80)
+        logger.info(f"📥 INCOMING OPENAI REQUEST (PASS-THROUGH)")
+        logger.info(f"Model: {model}")
+        logger.info(f"Max tokens: {max_tokens}")
+        logger.info(f"Streaming: {is_streaming}")
+        logger.info(f"Temperature: {openai_request.get('temperature', 'default')}")
+
+        # Log message count and preview
+        messages = openai_request.get("messages", [])
+        logger.info(f"Message count: {len(messages)}")
+        if messages:
+            last_message = messages[-1]
+            content = last_message.get("content", "")
+            preview = content[:200] + "..." if len(content) > 200 else content
+            logger.info(f"Last message preview: {preview}")
+
+        logger.debug(f"Full OpenAI request: {json.dumps(openai_request, indent=2)}")
+
+        # Pass through to OpenAI backend
+        logger.info("🔄 Passing through to OpenAI backend...")
+        openai_response = openai_client.create_completion(openai_request)
+        request_id = openai_response.get("id")
+
+        logger.debug(f"OpenAI response: {json.dumps(openai_response, indent=2)}")
+
+        # Log response details
+        elapsed_time = time.time() - start_time
+        usage = openai_response.get("usage", {})
+        prompt_tokens = usage.get("prompt_tokens", 0)
+        completion_tokens = usage.get("completion_tokens", 0)
+
+        logger.info(f"✅ REQUEST COMPLETED")
+        logger.info(f"Request ID: {request_id}")
+        logger.info(f"Duration: {elapsed_time:.2f}s")
+        logger.info(f"Prompt tokens: {prompt_tokens}")
+        logger.info(f"Completion tokens: {completion_tokens}")
+        logger.info(f"Total tokens: {prompt_tokens + completion_tokens}")
+
+        # Log response preview
+        choices = openai_response.get("choices", [])
+        if choices:
+            message = choices[0].get("message", {})
+            content = message.get("content", "")
+            preview = content[:200] + "..." if len(content) > 200 else content
+            logger.info(f"Response preview: {preview}")
+
+        logger.info("=" * 80)
+
+        # Return OpenAI format response directly
+        return JSONResponse(content=openai_response)
+
+    except ValueError as e:
+        elapsed_time = time.time() - start_time
+        logger.error("=" * 80)
+        logger.error(f"❌ VALIDATION ERROR")
+        logger.error(f"Request ID: {request_id}")
+        logger.error(f"Duration: {elapsed_time:.2f}s")
+        logger.error(f"Error: {e}")
+        logger.error("=" * 80)
+        raise HTTPException(status_code=400, detail=str(e))
+
+    except Exception as e:
+        elapsed_time = time.time() - start_time
+        logger.error("=" * 80)
+        logger.error(f"❌ INTERNAL ERROR")
+        logger.error(f"Request ID: {request_id}")
+        logger.error(f"Duration: {elapsed_time:.2f}s")
+        logger.error(f"Error type: {type(e).__name__}")
+        logger.error(f"Error message: {str(e)}")
+        logger.error(f"Full traceback:", exc_info=True)
+        logger.error("=" * 80)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 @app.post("/v1/messages")
