@@ -29,3 +29,8 @@ htmlcov/
 
 # Logs
 *.log
+
+# Database
+*.db
+*.sqlite
+*.sqlite3

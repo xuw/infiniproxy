@@ -1,17 +1,19 @@
 """Main proxy server for translating between Claude and OpenAI APIs."""
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Depends, Header
 from fastapi.responses import JSONResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import logging
 import sys
 import time
 import json
 import os
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from config import ProxyConfig
 from translator import APITranslator
 from openai_client import OpenAIClient
+from user_manager import UserManager
 
 # Configure logging
 logging.basicConfig(
@@ -34,12 +36,51 @@ app = FastAPI(
 config: ProxyConfig = None
 translator: APITranslator = None
 openai_client: OpenAIClient = None
+user_manager: UserManager = None
+
+# Security
+security = HTTPBearer(auto_error=False)
+
+
+async def get_current_user(
+    authorization: Optional[str] = Header(None)
+) -> Dict[str, Any]:
+    """
+    Dependency to validate API key and get current user.
+
+    Expects Authorization header: Bearer <api-key>
+    """
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing API key. Include 'Authorization: Bearer <your-api-key>' header."
+        )
+
+    # Parse Bearer token
+    parts = authorization.split()
+    if len(parts) != 2 or parts[0].lower() != 'bearer':
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid authorization header format. Use 'Bearer <api-key>'"
+        )
+
+    api_key = parts[1]
+
+    # Validate API key
+    user_info = user_manager.validate_api_key(api_key)
+    if not user_info:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or inactive API key"
+        )
+
+    return user_info
 
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize the proxy on startup."""
-    global config, translator, openai_client
+    global config, translator, openai_client, user_manager
 
     logger.info("Starting OpenAI to Claude API Proxy...")
 
@@ -66,6 +107,10 @@ async def startup_event():
         config.openai_api_key,
         config.timeout
     )
+
+    # Initialize user manager
+    user_manager = UserManager()
+    logger.info("User manager initialized")
 
     logger.info(f"Proxy server initialized successfully")
     logger.info(f"OpenAI backend: {config.openai_base_url}")
@@ -102,12 +147,17 @@ async def health():
 
 
 @app.post("/v1/chat/completions")
-async def chat_completions(request: Request):
+async def chat_completions(
+    request: Request,
+    user_info: Dict[str, Any] = Depends(get_current_user)
+):
     """
     Chat completions endpoint (OpenAI API format - pass-through).
 
     This endpoint accepts OpenAI API format requests and passes them directly
     to the backend without translation, returning OpenAI format responses.
+
+    Requires authentication via Bearer token.
     """
     start_time = time.time()
     request_id = None
@@ -123,6 +173,7 @@ async def chat_completions(request: Request):
 
         logger.info("=" * 80)
         logger.info(f"📥 INCOMING OPENAI REQUEST (PASS-THROUGH)")
+        logger.info(f"User: {user_info['username']} (ID: {user_info['user_id']})")
         logger.info(f"Model: {model}")
         logger.info(f"Max tokens: {max_tokens}")
         logger.info(f"Streaming: {is_streaming}")
@@ -167,6 +218,17 @@ async def chat_completions(request: Request):
             preview = content[:200] + "..." if len(content) > 200 else content
             logger.info(f"Response preview: {preview}")
 
+        # Track usage
+        user_manager.track_usage(
+            api_key_id=user_info['api_key_id'],
+            endpoint='/v1/chat/completions',
+            input_tokens=prompt_tokens,
+            output_tokens=completion_tokens,
+            model=model,
+            request_id=request_id
+        )
+        logger.info(f"✅ Usage tracked for user {user_info['username']}")
+
         logger.info("=" * 80)
 
         # Return OpenAI format response directly
@@ -196,11 +258,16 @@ async def chat_completions(request: Request):
 
 
 @app.post("/v1/messages")
-async def create_message(request: Request):
+async def create_message(
+    request: Request,
+    user_info: Dict[str, Any] = Depends(get_current_user)
+):
     """
     Create a message (Claude API endpoint).
 
     This endpoint accepts Claude API format requests and returns Claude format responses.
+
+    Requires authentication via Bearer token.
     """
     start_time = time.time()
     request_id = None
@@ -216,6 +283,7 @@ async def create_message(request: Request):
 
         logger.info("=" * 80)
         logger.info(f"📥 INCOMING REQUEST")
+        logger.info(f"User: {user_info['username']} (ID: {user_info['user_id']})")
         logger.info(f"Model: {original_model}")
         logger.info(f"Max tokens: {max_tokens}")
         logger.info(f"Streaming requested: {is_streaming_requested}")
@@ -276,6 +344,18 @@ async def create_message(request: Request):
             logger.info(f"Response preview: {preview}")
 
         logger.debug(f"Full Claude response: {json.dumps(claude_response, indent=2)}")
+
+        # Track usage
+        user_manager.track_usage(
+            api_key_id=user_info['api_key_id'],
+            endpoint='/v1/messages',
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            model=original_model,
+            request_id=request_id
+        )
+        logger.info(f"✅ Usage tracked for user {user_info['username']}")
+
         logger.info("=" * 80)
 
         return JSONResponse(content=claude_response)
@@ -301,6 +381,119 @@ async def create_message(request: Request):
         logger.error(f"Full traceback:", exc_info=True)
         logger.error("=" * 80)
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.post("/admin/users")
+async def create_user(username: str, email: Optional[str] = None):
+    """
+    Create a new user.
+
+    Admin endpoint - no authentication required for user creation.
+    """
+    try:
+        user_id = user_manager.create_user(username, email)
+        return {
+            "success": True,
+            "user_id": user_id,
+            "username": username,
+            "message": f"User {username} created successfully"
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/admin/api-keys")
+async def create_api_key_endpoint(user_id: int, name: Optional[str] = None):
+    """
+    Create a new API key for a user.
+
+    Admin endpoint - no authentication required for key creation.
+
+    Returns the API key - this is the ONLY time it will be shown!
+    """
+    try:
+        api_key = user_manager.create_api_key(user_id, name)
+        return {
+            "success": True,
+            "api_key": api_key,
+            "user_id": user_id,
+            "name": name,
+            "warning": "Save this API key! It will not be shown again."
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/admin/users")
+async def list_users_endpoint():
+    """
+    List all users.
+
+    Admin endpoint.
+    """
+    users = user_manager.list_users()
+    return {"users": users}
+
+
+@app.get("/admin/api-keys")
+async def list_api_keys_endpoint(user_id: Optional[int] = None):
+    """
+    List API keys, optionally filtered by user.
+
+    Admin endpoint.
+    """
+    api_keys = user_manager.list_api_keys(user_id)
+    return {"api_keys": api_keys}
+
+
+@app.delete("/admin/api-keys/{api_key_id}")
+async def deactivate_api_key_endpoint(api_key_id: int):
+    """
+    Deactivate an API key.
+
+    Admin endpoint.
+    """
+    try:
+        user_manager.deactivate_api_key(api_key_id)
+        return {
+            "success": True,
+            "message": f"API key {api_key_id} deactivated"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/usage/me")
+async def get_my_usage(
+    user_info: Dict[str, Any] = Depends(get_current_user),
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+):
+    """
+    Get usage statistics for the authenticated user.
+
+    Query parameters:
+    - start_date: ISO format date (e.g., 2024-01-01T00:00:00)
+    - end_date: ISO format date (e.g., 2024-12-31T23:59:59)
+    """
+    usage = user_manager.get_user_usage(
+        user_info['user_id'],
+        start_date,
+        end_date
+    )
+    usage['username'] = user_info['username']
+    return usage
+
+
+@app.get("/usage/api-key/{api_key_id}")
+async def get_api_key_usage_endpoint(api_key_id: int):
+    """
+    Get usage statistics for a specific API key.
+
+    Admin endpoint.
+    """
+    usage = user_manager.get_api_key_usage(api_key_id)
+    return usage
 
 
 if __name__ == "__main__":

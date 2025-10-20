@@ -7,6 +7,9 @@ A local proxy server that translates between OpenAI-compatible API format and Cl
 - ✅ **Dual API support**: Both Claude API format and OpenAI API format
 - ✅ **Translation mode**: Claude API requests → OpenAI backend (with translation)
 - ✅ **Pass-through mode**: OpenAI API requests → OpenAI backend (no translation)
+- ✅ **Multi-user support**: API key authentication for multiple users
+- ✅ **Usage tracking**: Track token usage per API key
+- ✅ **Admin endpoints**: User and API key management
 - ✅ Handles system messages properly
 - ✅ Supports multi-turn conversations
 - ✅ Handles Claude's content blocks
@@ -89,12 +92,67 @@ python proxy_server.py
 
 The server will start on `http://localhost:8000` (or your configured port).
 
+### User and API Key Management
+
+Before you can use the proxy, you need to create a user and API key:
+
+**1. Create a user:**
+```bash
+curl -X POST "http://localhost:8000/admin/users?username=alice&email=alice@example.com"
+```
+
+Response:
+```json
+{
+  "success": true,
+  "user_id": 1,
+  "username": "alice",
+  "message": "User alice created successfully"
+}
+```
+
+**2. Create an API key for the user:**
+```bash
+curl -X POST "http://localhost:8000/admin/api-keys?user_id=1&name=my-key"
+```
+
+Response:
+```json
+{
+  "success": true,
+  "api_key": "sk-abc123...",
+  "user_id": 1,
+  "name": "my-key",
+  "warning": "Save this API key! It will not be shown again."
+}
+```
+
+**Important:** Save the API key immediately - it cannot be retrieved later!
+
+**3. List all users:**
+```bash
+curl http://localhost:8000/admin/users
+```
+
+**4. List API keys:**
+```bash
+curl http://localhost:8000/admin/api-keys
+# Or for a specific user:
+curl "http://localhost:8000/admin/api-keys?user_id=1"
+```
+
+**5. Deactivate an API key:**
+```bash
+curl -X DELETE http://localhost:8000/admin/api-keys/1
+```
+
 ### Using with Claude Code
 
 Configure Claude Code to use the proxy as its API endpoint:
 
 1. Set the API endpoint to: `http://localhost:8000`
-2. The proxy accepts Claude API format at `/v1/messages`
+2. Set the API key to your generated key (from the API key creation step above)
+3. The proxy accepts Claude API format at `/v1/messages`
 
 ### Using with OpenAI-Compatible Clients
 
@@ -106,7 +164,7 @@ from openai import OpenAI
 
 client = OpenAI(
     base_url="http://localhost:8000/v1",
-    api_key="any-key"  # Not used by proxy, but required by SDK
+    api_key="sk-abc123..."  # Your API key from the key creation step
 )
 
 response = client.chat.completions.create(
@@ -123,7 +181,7 @@ import OpenAI from 'openai';
 
 const client = new OpenAI({
     baseURL: 'http://localhost:8000/v1',
-    apiKey: 'any-key'  // Not used by proxy
+    apiKey: 'sk-abc123...'  // Your API key
 });
 
 const response = await client.chat.completions.create({
@@ -136,6 +194,7 @@ const response = await client.chat.completions.create({
 ```bash
 curl -X POST http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-abc123..." \
   -d '{
     "model": "glm-4.6",
     "messages": [{"role": "user", "content": "Hello!"}]
@@ -164,9 +223,12 @@ Claude API endpoint (with translation to OpenAI format).
 This endpoint accepts Claude API format requests, translates them to OpenAI format,
 and returns responses in Claude format.
 
+**Requires authentication via Bearer token.**
+
 ```bash
 curl -X POST http://localhost:8000/v1/messages \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-abc123..." \
   -d '{
     "model": "claude-3-5-sonnet-20241022",
     "max_tokens": 1024,
@@ -185,9 +247,12 @@ OpenAI API endpoint (pass-through mode).
 This endpoint accepts OpenAI API format requests and passes them directly to the
 backend without translation, returning OpenAI format responses.
 
+**Requires authentication via Bearer token.**
+
 ```bash
 curl -X POST http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-abc123..." \
   -d '{
     "model": "glm-4.6",
     "max_tokens": 1024,
@@ -199,6 +264,62 @@ curl -X POST http://localhost:8000/v1/chat/completions \
     ]
   }'
 ```
+
+### Usage Tracking Endpoints
+
+#### `GET /usage/me`
+Get usage statistics for the authenticated user.
+
+```bash
+curl http://localhost:8000/usage/me \
+  -H "Authorization: Bearer sk-abc123..."
+
+# With date range:
+curl "http://localhost:8000/usage/me?start_date=2024-01-01T00:00:00&end_date=2024-12-31T23:59:59" \
+  -H "Authorization: Bearer sk-abc123..."
+```
+
+Response:
+```json
+{
+  "user_id": 1,
+  "username": "alice",
+  "total_requests": 42,
+  "total_input_tokens": 1500,
+  "total_output_tokens": 3000,
+  "total_tokens": 4500,
+  "usage_by_endpoint": [
+    {
+      "endpoint": "/v1/chat/completions",
+      "model": "glm-4.6",
+      "total_requests": 25,
+      "total_input_tokens": 900,
+      "total_output_tokens": 1800,
+      "total_tokens": 2700
+    }
+  ]
+}
+```
+
+### Admin Endpoints
+
+#### `POST /admin/users`
+Create a new user (shown above in User Management section).
+
+#### `POST /admin/api-keys`
+Create an API key for a user (shown above in User Management section).
+
+#### `GET /admin/users`
+List all users.
+
+#### `GET /admin/api-keys`
+List all API keys or keys for a specific user.
+
+#### `DELETE /admin/api-keys/{api_key_id}`
+Deactivate an API key.
+
+#### `GET /usage/api-key/{api_key_id}`
+Get usage statistics for a specific API key.
 
 ## Testing
 
@@ -262,7 +383,9 @@ infiniproxy/
 ├── config.py              # Configuration management
 ├── translator.py          # Request/response translation logic
 ├── openai_client.py       # OpenAI API client
+├── user_manager.py        # User and API key management
 ├── proxy_server.py        # Main proxy server (FastAPI)
+├── proxy_users.db         # SQLite database (not in git)
 ├── requirements.txt       # Python dependencies
 ├── .env                   # Configuration (not in git)
 ├── .gitignore            # Git ignore patterns
