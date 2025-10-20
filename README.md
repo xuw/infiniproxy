@@ -10,6 +10,7 @@ A local proxy server that translates between OpenAI-compatible API format and Cl
 - ✅ **Multi-user support**: API key authentication for multiple users
 - ✅ **Usage tracking**: Track token usage per API key
 - ✅ **Admin endpoints**: User and API key management
+- ✅ **Web-based Admin UI**: Beautiful interface for managing users and viewing usage
 - ✅ Handles system messages properly
 - ✅ Supports multi-turn conversations
 - ✅ Handles Claude's content blocks
@@ -92,7 +93,31 @@ python proxy_server.py
 
 The server will start on `http://localhost:8000` (or your configured port).
 
-### User and API Key Management
+### Web-Based Admin Interface
+
+The easiest way to manage users and API keys is through the web-based admin interface:
+
+**Access the Admin UI:**
+```
+http://localhost:8000/admin
+```
+
+The admin interface provides:
+- 👥 **Users Tab**: Create and view all users
+- 🔑 **API Keys Tab**: Generate, view, and deactivate API keys
+- 📊 **Usage Statistics Tab**: View token usage per API key
+
+**Features:**
+- Beautiful, responsive interface
+- Real-time data updates
+- Secure API key generation (shown only once)
+- Usage tracking visualization
+- Filter API keys by user
+- One-click key deactivation
+
+### Command-Line User and API Key Management
+
+You can also manage users and keys via command-line:
 
 Before you can use the proxy, you need to create a user and API key:
 
@@ -393,6 +418,9 @@ infiniproxy/
 ├── README.md             # This file
 ├── test_api.py           # API verification script
 ├── test_e2e.py           # End-to-end tests
+├── static/               # Admin UI assets
+│   ├── admin.html        # Admin interface HTML
+│   └── admin.js          # Admin interface JavaScript
 └── tests/                # Unit tests
     ├── __init__.py
     ├── test_translator.py

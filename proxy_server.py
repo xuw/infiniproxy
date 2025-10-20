@@ -1,8 +1,9 @@
 """Main proxy server for translating between Claude and OpenAI APIs."""
 
 from fastapi import FastAPI, HTTPException, Request, Depends, Header
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.staticfiles import StaticFiles
 import logging
 import sys
 import time
@@ -31,6 +32,10 @@ app = FastAPI(
     description="Proxy server that translates between OpenAI and Claude API formats",
     version="1.0.0"
 )
+
+# Mount static files for admin UI
+if os.path.exists("static"):
+    app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Global configuration (will be set on startup)
 config: ProxyConfig = None
@@ -130,9 +135,20 @@ async def root():
         "endpoints": {
             "claude_messages": "/v1/messages (Claude API format)",
             "openai_chat": "/v1/chat/completions (OpenAI API format - pass-through)",
-            "health": "/health"
+            "health": "/health",
+            "admin_ui": "/admin (Web-based admin interface)"
         }
     }
+
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_ui():
+    """Serve the admin UI."""
+    try:
+        with open("static/admin.html", "r") as f:
+            return HTMLResponse(content=f.read())
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Admin UI not found")
 
 
 @app.get("/health")
