@@ -1,0 +1,42 @@
+services:
+  infiniproxy:
+    build: .
+    image: infiniproxy:latest
+    container_name: infiniproxy
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # OpenAI Backend Configuration (REQUIRED)
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1/chat/completions}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4}
+
+      # Proxy Configuration
+      - PROXY_HOST=${PROXY_HOST:-0.0.0.0}
+      - PROXY_PORT=${PROXY_PORT:-8000}
+      - MAX_INPUT_TOKENS=${MAX_INPUT_TOKENS:-200000}
+      - MAX_OUTPUT_TOKENS=${MAX_OUTPUT_TOKENS:-200000}
+      - TIMEOUT=${TIMEOUT:-120}
+      - DEBUG=${DEBUG:-false}
+
+      # Admin Authentication (IMPORTANT: Change these!)
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-changeme}
+    volumes:
+      # Persist database
+      - ./data:/app/data
+      # Mount custom .env if it exists
+      - ./.env:/app/.env:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - infiniproxy-network
+
+networks:
+  infiniproxy-network:
+    driver: bridge

@@ -1,7 +1,7 @@
 """Main proxy server for translating between Claude and OpenAI APIs."""
 
-from fastapi import FastAPI, HTTPException, Request, Depends, Header
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi import FastAPI, HTTPException, Request, Depends, Header, Cookie, UploadFile, File, Form
+from fastapi.responses import JSONResponse, HTMLResponse, Response, RedirectResponse, StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
 import logging
@@ -9,12 +9,15 @@ import sys
 import time
 import json
 import os
-from typing import Dict, Any, Optional
+import csv
+import io
+from typing import Dict, Any, Optional, List
 
 from config import ProxyConfig
 from translator import APITranslator
 from openai_client import OpenAIClient
 from user_manager import UserManager
+import admin_auth
 
 # Configure logging
 logging.basicConfig(
@@ -82,6 +85,27 @@ async def get_current_user(
     return user_info
 
 
+async def verify_admin_session(admin_session: Optional[str] = Cookie(None)):
+    """
+    Dependency to verify admin session token.
+
+    Checks for admin_session cookie and validates it.
+    """
+    if not admin_session:
+        raise HTTPException(
+            status_code=401,
+            detail="Admin authentication required. Please login."
+        )
+
+    if not admin_auth.admin_auth.verify_session(admin_session):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired session. Please login again."
+        )
+
+    return admin_session
+
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize the proxy on startup."""
@@ -114,8 +138,15 @@ async def startup_event():
     )
 
     # Initialize user manager
-    user_manager = UserManager()
-    logger.info("User manager initialized")
+    # Use /app/data directory if it exists (Docker), otherwise current directory
+    db_dir = "/app/data" if os.path.exists("/app/data") else "."
+    db_path = os.path.join(db_dir, "proxy_users.db")
+    user_manager = UserManager(db_path=db_path)
+    logger.info(f"User manager initialized with database at {db_path}")
+
+    # Initialize admin authentication
+    admin_auth.init_admin_auth()
+    logger.info("Admin authentication initialized")
 
     logger.info(f"Proxy server initialized successfully")
     logger.info(f"OpenAI backend: {config.openai_base_url}")
@@ -141,9 +172,25 @@ async def root():
     }
 
 
-@app.get("/admin", response_class=HTMLResponse)
-async def admin_ui():
-    """Serve the admin UI."""
+@app.get("/admin/login-page", response_class=HTMLResponse)
+async def login_page():
+    """Serve the login page."""
+    try:
+        with open("static/login.html", "r") as f:
+            return HTMLResponse(content=f.read())
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Login page not found")
+
+
+@app.get("/admin")
+async def admin_ui(admin_session: Optional[str] = Cookie(None)):
+    """Serve the admin UI. Redirects to login if not authenticated."""
+    # Check if user has valid session
+    if not admin_session or not admin_auth.admin_auth.verify_session(admin_session):
+        # Redirect to login page
+        return RedirectResponse(url="/admin/login-page", status_code=303)
+
+    # User is authenticated, serve admin UI
     try:
         with open("static/admin.html", "r") as f:
             return HTMLResponse(content=f.read())
@@ -160,6 +207,81 @@ async def health():
         "openai_backend": config.openai_base_url,
         "openai_model": config.openai_model
     }
+
+
+@app.post("/admin/login")
+async def admin_login(request: Request):
+    """
+    Admin login endpoint.
+
+    Expects JSON body with username and password.
+    Returns session token as cookie on success.
+    """
+    try:
+        body = await request.json()
+        username = body.get("username")
+        password = body.get("password")
+
+        if not username or not password:
+            raise HTTPException(
+                status_code=400,
+                detail="Username and password are required"
+            )
+
+        # Verify credentials
+        if not admin_auth.admin_auth.verify_credentials(username, password):
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid username or password"
+            )
+
+        # Create session
+        session_token = admin_auth.admin_auth.create_session(username)
+
+        # Create response with session cookie
+        response = JSONResponse(content={
+            "success": True,
+            "message": "Login successful"
+        })
+
+        # Set secure cookie (24 hour expiry)
+        response.set_cookie(
+            key="admin_session",
+            value=session_token,
+            httponly=True,
+            max_age=86400,  # 24 hours
+            samesite="strict"
+        )
+
+        logger.info(f"Admin login successful: {username}")
+        return response
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Login error: {e}")
+        raise HTTPException(status_code=500, detail="Login failed")
+
+
+@app.post("/admin/logout")
+async def admin_logout(admin_session: Optional[str] = Cookie(None)):
+    """
+    Admin logout endpoint.
+
+    Deletes the session and clears the cookie.
+    """
+    if admin_session:
+        admin_auth.admin_auth.delete_session(admin_session)
+        logger.info("Admin logout successful")
+
+    response = JSONResponse(content={
+        "success": True,
+        "message": "Logout successful"
+    })
+
+    # Clear the cookie
+    response.delete_cookie(key="admin_session")
+    return response
 
 
 @app.post("/v1/chat/completions")
@@ -400,30 +522,145 @@ async def create_message(
 
 
 @app.post("/admin/users")
-async def create_user(username: str, email: Optional[str] = None):
+async def create_user(
+    username: str,
+    email: Optional[str] = None,
+    session: str = Depends(verify_admin_session)
+):
     """
-    Create a new user.
+    Create a new user and automatically generate a default API key.
 
-    Admin endpoint - no authentication required for user creation.
+    Admin endpoint - requires authentication.
+
+    Returns the user info and the generated API key (shown only once).
     """
     try:
+        # Create the user
         user_id = user_manager.create_user(username, email)
+
+        # Automatically create a default API key
+        api_key = user_manager.create_api_key(user_id, name="Default Key")
+
         return {
             "success": True,
             "user_id": user_id,
             "username": username,
-            "message": f"User {username} created successfully"
+            "api_key": api_key,
+            "message": f"User {username} created successfully",
+            "warning": "Save this API key! It will not be shown again."
         }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@app.post("/admin/users/batch")
+async def create_users_batch(
+    csv_file: Optional[UploadFile] = File(None),
+    csv_text: Optional[str] = Form(None),
+    session: str = Depends(verify_admin_session)
+):
+    """
+    Batch create users from CSV file or text input.
+
+    Admin endpoint - requires authentication.
+
+    Accepts either:
+    - csv_file: Uploaded CSV file
+    - csv_text: CSV content as text
+
+    CSV format: username,email (no header required)
+
+    Returns CSV with: username,email,api_key
+    - If creation succeeds: actual API key
+    - If creation fails: "user_creation_failed"
+    """
+    try:
+        # Get CSV content from either file upload or text input
+        if csv_file:
+            content = await csv_file.read()
+            csv_content = content.decode('utf-8')
+        elif csv_text:
+            csv_content = csv_text
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Either csv_file or csv_text must be provided"
+            )
+
+        # Parse CSV input
+        csv_reader = csv.reader(io.StringIO(csv_content))
+        results = []
+
+        for row in csv_reader:
+            # Skip empty rows
+            if not row or len(row) == 0:
+                continue
+
+            # Extract username and email
+            username = row[0].strip() if len(row) > 0 else ""
+            email = row[1].strip() if len(row) > 1 else ""
+
+            if not username:
+                # Skip rows without username
+                continue
+
+            # Try to create user and generate API key
+            try:
+                user_id = user_manager.create_user(username, email if email else None)
+                api_key = user_manager.create_api_key(user_id, name="Default Key")
+
+                results.append({
+                    "username": username,
+                    "email": email,
+                    "api_key": api_key
+                })
+                logger.info(f"Batch created user: {username}")
+
+            except Exception as e:
+                logger.error(f"Failed to create user {username}: {e}")
+                results.append({
+                    "username": username,
+                    "email": email,
+                    "api_key": "user_creation_failed"
+                })
+
+        # Generate CSV output
+        output = io.StringIO()
+        csv_writer = csv.writer(output)
+        csv_writer.writerow(["username", "email", "api_key"])
+
+        for result in results:
+            csv_writer.writerow([
+                result["username"],
+                result["email"],
+                result["api_key"]
+            ])
+
+        # Return as CSV file download
+        csv_output = output.getvalue()
+        return StreamingResponse(
+            io.BytesIO(csv_output.encode('utf-8')),
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": "attachment; filename=users_with_keys.csv"
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"Batch user creation error: {e}")
+        raise HTTPException(status_code=500, detail=f"Batch creation failed: {str(e)}")
+
+
 @app.post("/admin/api-keys")
-async def create_api_key_endpoint(user_id: int, name: Optional[str] = None):
+async def create_api_key_endpoint(
+    user_id: int,
+    name: Optional[str] = None,
+    session: str = Depends(verify_admin_session)
+):
     """
     Create a new API key for a user.
 
-    Admin endpoint - no authentication required for key creation.
+    Admin endpoint - requires authentication.
 
     Returns the API key - this is the ONLY time it will be shown!
     """
@@ -441,33 +678,39 @@ async def create_api_key_endpoint(user_id: int, name: Optional[str] = None):
 
 
 @app.get("/admin/users")
-async def list_users_endpoint():
+async def list_users_endpoint(session: str = Depends(verify_admin_session)):
     """
     List all users.
 
-    Admin endpoint.
+    Admin endpoint - requires authentication.
     """
     users = user_manager.list_users()
     return {"users": users}
 
 
 @app.get("/admin/api-keys")
-async def list_api_keys_endpoint(user_id: Optional[int] = None):
+async def list_api_keys_endpoint(
+    user_id: Optional[int] = None,
+    session: str = Depends(verify_admin_session)
+):
     """
     List API keys, optionally filtered by user.
 
-    Admin endpoint.
+    Admin endpoint - requires authentication.
     """
     api_keys = user_manager.list_api_keys(user_id)
     return {"api_keys": api_keys}
 
 
 @app.delete("/admin/api-keys/{api_key_id}")
-async def deactivate_api_key_endpoint(api_key_id: int):
+async def deactivate_api_key_endpoint(
+    api_key_id: int,
+    session: str = Depends(verify_admin_session)
+):
     """
     Deactivate an API key.
 
-    Admin endpoint.
+    Admin endpoint - requires authentication.
     """
     try:
         user_manager.deactivate_api_key(api_key_id)
