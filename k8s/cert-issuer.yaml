@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cloudflare-api-token
+  namespace: weixu
+type: Opaque
+stringData:
+  api-token: "6c7p0xZmgxH2K74AeY48YQt-gj7Wro3fonux3582"
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-dns-cloudflare
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: admin@iiis.co
+    privateKeySecretRef:
+      name: letsencrypt-dns-cloudflare-key
+    solvers:
+    - dns01:
+        cloudflare:
+          apiTokenSecretRef:
+            name: cloudflare-api-token
+            key: api-token
+      selector:
+        dnsZones:
+        - iiis.co

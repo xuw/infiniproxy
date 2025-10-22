@@ -1,0 +1,126 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: infiniproxy
+  namespace: weixu
+  labels:
+    app: infiniproxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: infiniproxy
+  template:
+    metadata:
+      labels:
+        app: infiniproxy
+    spec:
+      containers:
+      - name: infiniproxy
+        image: harbor.ai.iiis.co:9443/xuw/infiniproxy:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+          name: http
+          protocol: TCP
+        env:
+        - name: PROXY_HOST
+          value: "0.0.0.0"
+        - name: PROXY_PORT
+          value: "8000"
+        - name: OPENAI_BASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: infiniproxy-secrets
+              key: openai-base-url
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: infiniproxy-secrets
+              key: openai-api-key
+        - name: OPENAI_MODEL
+          valueFrom:
+            secretKeyRef:
+              name: infiniproxy-secrets
+              key: openai-model
+        - name: ADMIN_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: infiniproxy-secrets
+              key: admin-username
+        - name: ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: infiniproxy-secrets
+              key: admin-password
+        - name: MAX_INPUT_TOKENS
+          value: "200000"
+        - name: MAX_OUTPUT_TOKENS
+          value: "200000"
+        - name: TIMEOUT
+          value: "120"
+        volumeMounts:
+        - name: db-storage
+          mountPath: /app/data
+        - name: logs
+          mountPath: /app/logs
+        - name: temp
+          mountPath: /tmp
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+      volumes:
+      - name: db-storage
+        persistentVolumeClaim:
+          claimName: pvc-nfshome-weixu
+      - name: logs
+        persistentVolumeClaim:
+          claimName: gfs-sata-pvc-weixu
+      - name: temp
+        persistentVolumeClaim:
+          claimName: pvc-rancher-localpath-1-weixu-weixu-claude-claude-qassum9i
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: infiniproxy
+  namespace: weixu
+  labels:
+    app: infiniproxy
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8000
+    targetPort: 8000
+    protocol: TCP
+    name: http
+  selector:
+    app: infiniproxy
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: infiniproxy-config
+  namespace: weixu
+data:
+  openai-model: "gpt-4"

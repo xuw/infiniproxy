@@ -1,0 +1,24 @@
+# Simple Ingress without TLS for initial testing
+# We'll add cert-manager TLS later
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: infiniproxy
+  namespace: weixu
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: aiapi.iiis.co
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: infiniproxy
+            port:
+              number: 8000

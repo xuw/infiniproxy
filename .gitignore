@@ -34,3 +34,6 @@ htmlcov/
 *.db
 *.sqlite
 *.sqlite3
+
+# Kubernetes secrets (contains real API keys)
+k8s/secrets.yaml
