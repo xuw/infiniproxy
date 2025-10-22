@@ -144,9 +144,9 @@ async def startup_event():
     user_manager = UserManager(db_path=db_path)
     logger.info(f"User manager initialized with database at {db_path}")
 
-    # Initialize admin authentication
-    admin_auth.init_admin_auth()
-    logger.info("Admin authentication initialized")
+    # Initialize admin authentication with same database
+    admin_auth.init_admin_auth(db_path=db_path)
+    logger.info(f"Admin authentication initialized with database-backed sessions at {db_path}")
 
     logger.info(f"Proxy server initialized successfully")
     logger.info(f"OpenAI backend: {config.openai_base_url}")

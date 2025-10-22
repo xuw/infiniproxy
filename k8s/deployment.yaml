@@ -109,6 +109,10 @@ metadata:
     app: infiniproxy
 spec:
   type: ClusterIP
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 10800  # 3 hours
   ports:
   - port: 8000
     targetPort: 8000

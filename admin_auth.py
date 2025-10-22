@@ -5,17 +5,49 @@ import hashlib
 from datetime import datetime, timedelta
 from typing import Optional, Dict
 import os
+import sqlite3
+import json
+from contextlib import contextmanager
 
 
 class AdminAuth:
-    """Simple session-based authentication for admin users."""
+    """Session-based authentication for admin users with database-backed sessions."""
 
-    def __init__(self, username: str, password: str):
-        """Initialize admin auth with credentials."""
+    def __init__(self, username: str, password: str, db_path: str = "proxy_users.db"):
+        """Initialize admin auth with credentials and database path."""
         self.admin_username = username
         self.admin_password_hash = self._hash_password(password)
-        self.sessions: Dict[str, Dict] = {}  # token -> session data
+        self.db_path = db_path
         self.session_duration = timedelta(hours=24)
+        self._init_sessions_table()
+
+    @contextmanager
+    def _get_db(self):
+        """Get database connection context manager."""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+    def _init_sessions_table(self):
+        """Initialize the sessions table in the database."""
+        with self._get_db() as conn:
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS admin_sessions (
+                    token TEXT PRIMARY KEY,
+                    username TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL
+                )
+            ''')
+            # Create index for faster expiration cleanup
+            conn.execute('''
+                CREATE INDEX IF NOT EXISTS idx_admin_sessions_expires
+                ON admin_sessions(expires_at)
+            ''')
+            conn.commit()
 
     @staticmethod
     def _hash_password(password: str) -> str:
@@ -32,11 +64,16 @@ class AdminAuth:
     def create_session(self, username: str) -> str:
         """Create a new session and return the session token."""
         token = secrets.token_urlsafe(32)
-        self.sessions[token] = {
-            'username': username,
-            'created_at': datetime.utcnow(),
-            'expires_at': datetime.utcnow() + self.session_duration
-        }
+        created_at = datetime.utcnow()
+        expires_at = created_at + self.session_duration
+
+        with self._get_db() as conn:
+            conn.execute('''
+                INSERT INTO admin_sessions (token, username, created_at, expires_at)
+                VALUES (?, ?, ?, ?)
+            ''', (token, username, created_at.isoformat(), expires_at.isoformat()))
+            conn.commit()
+
         return token
 
     def verify_session(self, token: Optional[str]) -> bool:
@@ -44,43 +81,68 @@ class AdminAuth:
         if not token:
             return False
 
-        session = self.sessions.get(token)
-        if not session:
-            return False
+        with self._get_db() as conn:
+            cursor = conn.execute('''
+                SELECT expires_at FROM admin_sessions
+                WHERE token = ?
+            ''', (token,))
+            row = cursor.fetchone()
 
-        # Check if session has expired
-        if datetime.utcnow() > session['expires_at']:
-            del self.sessions[token]
-            return False
+            if not row:
+                return False
 
-        return True
+            # Check if session has expired
+            expires_at = datetime.fromisoformat(row['expires_at'])
+            if datetime.utcnow() > expires_at:
+                # Delete expired session
+                conn.execute('DELETE FROM admin_sessions WHERE token = ?', (token,))
+                conn.commit()
+                return False
+
+            return True
 
     def get_session_info(self, token: str) -> Optional[Dict]:
         """Get session information."""
-        return self.sessions.get(token)
+        with self._get_db() as conn:
+            cursor = conn.execute('''
+                SELECT username, created_at, expires_at
+                FROM admin_sessions
+                WHERE token = ?
+            ''', (token,))
+            row = cursor.fetchone()
+
+            if not row:
+                return None
+
+            return {
+                'username': row['username'],
+                'created_at': datetime.fromisoformat(row['created_at']),
+                'expires_at': datetime.fromisoformat(row['expires_at'])
+            }
 
     def delete_session(self, token: str):
         """Delete a session (logout)."""
-        if token in self.sessions:
-            del self.sessions[token]
+        with self._get_db() as conn:
+            conn.execute('DELETE FROM admin_sessions WHERE token = ?', (token,))
+            conn.commit()
 
     def cleanup_expired_sessions(self):
         """Remove expired sessions."""
-        now = datetime.utcnow()
-        expired_tokens = [
-            token for token, session in self.sessions.items()
-            if now > session['expires_at']
-        ]
-        for token in expired_tokens:
-            del self.sessions[token]
+        with self._get_db() as conn:
+            now = datetime.utcnow()
+            conn.execute('''
+                DELETE FROM admin_sessions
+                WHERE expires_at < ?
+            ''', (now.isoformat(),))
+            conn.commit()
 
 
 # Global admin auth instance (will be initialized in proxy_server.py)
 admin_auth: Optional[AdminAuth] = None
 
 
-def init_admin_auth():
-    """Initialize admin auth from environment variables."""
+def init_admin_auth(db_path: str = "proxy_users.db"):
+    """Initialize admin auth from environment variables with database-backed sessions."""
     global admin_auth
 
     username = os.getenv('ADMIN_USERNAME', 'admin')
@@ -94,5 +156,5 @@ def init_admin_auth():
             "Please set ADMIN_PASSWORD in .env file for security."
         )
 
-    admin_auth = AdminAuth(username, password)
+    admin_auth = AdminAuth(username, password, db_path)
     return admin_auth
