@@ -156,6 +156,15 @@ async def startup_event():
     logger.info(f"Proxy listening on: {config.proxy_host}:{config.proxy_port}")
 
 
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup on shutdown."""
+    global openai_client
+    if openai_client:
+        await openai_client.close()
+        logger.info("OpenAI client closed")
+
+
 @app.get("/")
 async def root():
     """Root endpoint returning server information."""
@@ -330,7 +339,7 @@ async def chat_completions(
 
         # Pass through to OpenAI backend
         logger.info("🔄 Passing through to OpenAI backend...")
-        openai_response = openai_client.create_completion(openai_request)
+        openai_response = await openai_client.create_completion(openai_request)
         request_id = openai_response.get("id")
 
         logger.debug(f"OpenAI response: {json.dumps(openai_response, indent=2)}")
@@ -448,7 +457,7 @@ async def create_message(
 
         # Always use non-streaming on OpenAI side
         logger.info("🔄 Processing non-streaming request...")
-        openai_response = openai_client.create_completion(openai_request)
+        openai_response = await openai_client.create_completion(openai_request)
         request_id = openai_response.get("id")
 
         logger.debug(f"OpenAI response: {json.dumps(openai_response, indent=2)}")

@@ -1,6 +1,6 @@
 """OpenAI API client for making requests to OpenAI-compatible endpoints."""
 
-import requests
+import httpx
 from typing import Dict, Any, Optional
 import logging
 
@@ -22,10 +22,15 @@ class OpenAIClient:
         self.base_url = base_url
         self.api_key = api_key
         self.timeout = timeout
+        # Create async client with connection pooling for concurrency
+        self.client = httpx.AsyncClient(
+            timeout=httpx.Timeout(timeout),
+            limits=httpx.Limits(max_keepalive_connections=200, max_connections=250)
+        )
 
-    def create_completion(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def create_completion(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Create a chat completion.
+        Create a chat completion (async).
 
         Args:
             request: OpenAI API request payload
@@ -34,23 +39,22 @@ class OpenAIClient:
             OpenAI API response
 
         Raises:
-            requests.HTTPError: If the request fails
-            requests.Timeout: If the request times out
+            httpx.HTTPError: If the request fails
+            httpx.TimeoutException: If the request times out
         """
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}"
         }
 
-        logger.info(f"Sending request to {self.base_url}")
+        logger.info(f"Sending async request to {self.base_url}")
         logger.debug(f"Request payload: {request}")
 
         try:
-            response = requests.post(
+            response = await self.client.post(
                 self.base_url,
                 json=request,
-                headers=headers,
-                timeout=self.timeout
+                headers=headers
             )
 
             logger.info(f"Received response with status code: {response.status_code}")
@@ -63,22 +67,22 @@ class OpenAIClient:
 
             return response_data
 
-        except requests.Timeout as e:
+        except httpx.TimeoutException as e:
             logger.error(f"Request timed out after {self.timeout} seconds")
             raise
 
-        except requests.HTTPError as e:
+        except httpx.HTTPError as e:
             logger.error(f"HTTP error: {e}")
-            logger.error(f"Response text: {e.response.text if e.response else 'No response'}")
+            logger.error(f"Response text: {e.response.text if hasattr(e, 'response') and e.response else 'No response'}")
             raise
 
         except Exception as e:
             logger.error(f"Unexpected error: {e}")
             raise
 
-    def create_streaming_completion(self, request: Dict[str, Any]):
+    async def create_streaming_completion(self, request: Dict[str, Any]):
         """
-        Create a streaming chat completion.
+        Create a streaming chat completion (async).
 
         Args:
             request: OpenAI API request payload with stream=True
@@ -87,8 +91,8 @@ class OpenAIClient:
             Server-sent events in OpenAI format
 
         Raises:
-            requests.HTTPError: If the request fails
-            requests.Timeout: If the request times out
+            httpx.HTTPError: If the request fails
+            httpx.TimeoutException: If the request times out
         """
         headers = {
             "Content-Type": "application/json",
@@ -96,37 +100,38 @@ class OpenAIClient:
             "Accept": "text/event-stream"
         }
 
-        logger.info(f"Sending streaming request to {self.base_url}")
+        logger.info(f"Sending async streaming request to {self.base_url}")
         logger.debug(f"Request payload: {request}")
 
         try:
-            response = requests.post(
+            async with self.client.stream(
+                "POST",
                 self.base_url,
                 json=request,
-                headers=headers,
-                timeout=self.timeout,
-                stream=True
-            )
+                headers=headers
+            ) as response:
+                logger.info(f"Received streaming response with status code: {response.status_code}")
+                response.raise_for_status()
 
-            logger.info(f"Received streaming response with status code: {response.status_code}")
-            response.raise_for_status()
+                # Stream the response
+                async for line in response.aiter_lines():
+                    if line:
+                        logger.debug(f"Streaming line: {line}")
+                        yield line
 
-            # Stream the response
-            for line in response.iter_lines():
-                if line:
-                    decoded_line = line.decode('utf-8')
-                    logger.debug(f"Streaming line: {decoded_line}")
-                    yield decoded_line
-
-        except requests.Timeout as e:
+        except httpx.TimeoutException as e:
             logger.error(f"Streaming request timed out after {self.timeout} seconds")
             raise
 
-        except requests.HTTPError as e:
+        except httpx.HTTPError as e:
             logger.error(f"HTTP error in streaming: {e}")
-            logger.error(f"Response text: {e.response.text if e.response else 'No response'}")
+            logger.error(f"Response text: {e.response.text if hasattr(e, 'response') and e.response else 'No response'}")
             raise
 
         except Exception as e:
             logger.error(f"Unexpected error in streaming: {e}")
             raise
+
+    async def close(self):
+        """Close the async client."""
+        await self.client.aclose()

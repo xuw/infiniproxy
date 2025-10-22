@@ -36,5 +36,7 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Run the application
-CMD ["python", "-u", "proxy_server.py"]
+# Run the application with uvicorn
+# Using 4 workers for concurrency (adjust based on CPU cores)
+# Each worker can handle multiple concurrent requests via async
+CMD ["uvicorn", "proxy_server:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4", "--log-level", "info"]
