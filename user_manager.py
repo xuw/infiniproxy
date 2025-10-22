@@ -42,6 +42,7 @@ class UserManager:
                 key_hash TEXT UNIQUE NOT NULL,
                 key_prefix TEXT NOT NULL,
                 name TEXT,
+                model_name TEXT,
                 created_at TEXT NOT NULL,
                 last_used_at TEXT,
                 is_active INTEGER DEFAULT 1,
@@ -80,6 +81,13 @@ class UserManager:
             CREATE INDEX IF NOT EXISTS idx_usage_timestamp
             ON usage_records(timestamp)
         """)
+
+        # Migration: Add model_name column if it doesn't exist
+        cursor.execute("PRAGMA table_info(api_keys)")
+        columns = [col[1] for col in cursor.fetchall()]
+        if 'model_name' not in columns:
+            logger.info("Migrating database: adding model_name column to api_keys")
+            cursor.execute("ALTER TABLE api_keys ADD COLUMN model_name TEXT")
 
         conn.commit()
         conn.close()
@@ -171,6 +179,7 @@ class UserManager:
                     u.is_active as user_active,
                     a.id as api_key_id,
                     a.name as api_key_name,
+                    a.model_name as model_name,
                     a.is_active as key_active
                 FROM api_keys a
                 JOIN users u ON a.user_id = u.id
@@ -347,7 +356,7 @@ class UserManager:
         try:
             if user_id:
                 cursor.execute("""
-                    SELECT id, user_id, key_prefix, name, created_at,
+                    SELECT id, user_id, key_prefix, name, model_name, created_at,
                            last_used_at, is_active
                     FROM api_keys
                     WHERE user_id = ?
@@ -355,7 +364,7 @@ class UserManager:
                 """, (user_id,))
             else:
                 cursor.execute("""
-                    SELECT id, user_id, key_prefix, name, created_at,
+                    SELECT id, user_id, key_prefix, name, model_name, created_at,
                            last_used_at, is_active
                     FROM api_keys
                     ORDER BY created_at DESC
@@ -377,5 +386,47 @@ class UserManager:
             )
             conn.commit()
             logger.info(f"Deactivated API key {api_key_id}")
+        finally:
+            conn.close()
+
+    def get_model_setting(self, api_key_id: int) -> Optional[str]:
+        """
+        Get the model name setting for an API key.
+
+        Returns:
+            Model name if set, None otherwise
+        """
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute(
+                "SELECT model_name FROM api_keys WHERE id = ?",
+                (api_key_id,)
+            )
+            row = cursor.fetchone()
+            return row['model_name'] if row else None
+        finally:
+            conn.close()
+
+    def set_model_setting(self, api_key_id: int, model_name: Optional[str]):
+        """
+        Set the model name for an API key.
+
+        Args:
+            api_key_id: API key ID
+            model_name: Model name to set (None to unset)
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute(
+                "UPDATE api_keys SET model_name = ? WHERE id = ?",
+                (model_name, api_key_id)
+            )
+            conn.commit()
+            logger.info(f"Set model for API key {api_key_id} to {model_name}")
         finally:
             conn.close()

@@ -312,6 +312,7 @@ async def chat_completions(
     try:
         # Parse OpenAI request
         openai_request = await request.json()
+        original_had_model = 'model' in openai_request
 
         # Log incoming request details
         model = openai_request.get("model", config.openai_model)
@@ -336,6 +337,11 @@ async def chat_completions(
             logger.info(f"Last message preview: {preview}")
 
         logger.debug(f"Full OpenAI request: {json.dumps(openai_request, indent=2)}")
+
+        # Use per-key model if set and model not explicitly provided in request
+        if user_info.get('model_name') and not original_had_model:
+            openai_request['model'] = user_info['model_name']
+            logger.info(f"Using per-key model: {user_info['model_name']}")
 
         # Pass through to OpenAI backend
         logger.info("🔄 Passing through to OpenAI backend...")
@@ -453,6 +459,12 @@ async def create_message(
 
         # Translate to OpenAI format (will always use non-streaming)
         openai_request = translator.translate_request_to_openai(claude_request)
+
+        # Use per-key model if set, otherwise use global default
+        if user_info.get('model_name'):
+            openai_request['model'] = user_info['model_name']
+            logger.info(f"Using per-key model: {user_info['model_name']}")
+
         logger.debug(f"Translated to OpenAI request: {json.dumps(openai_request, indent=2)}")
 
         # Always use non-streaming on OpenAI side
@@ -762,6 +774,72 @@ async def get_api_key_usage_endpoint(api_key_id: int):
     """
     usage = user_manager.get_api_key_usage(api_key_id)
     return usage
+
+
+@app.get("/settings/model")
+async def get_model_setting(user_info: Dict[str, Any] = Depends(get_current_user)):
+    """
+    Get the model name setting for the authenticated user's API key.
+
+    Returns the custom model name if set, or null if using the global default.
+
+    Requires authentication via Bearer token.
+    """
+    model_name = user_manager.get_model_setting(user_info['api_key_id'])
+    return {
+        "api_key_id": user_info['api_key_id'],
+        "api_key_name": user_info.get('api_key_name'),
+        "model_name": model_name,
+        "using_default": model_name is None
+    }
+
+
+@app.put("/settings/model")
+async def set_model_setting(
+    request: Request,
+    user_info: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Set the model name for the authenticated user's API key.
+
+    Request body:
+    {
+        "model_name": "gpt-4" or null to use global default
+    }
+
+    Requires authentication via Bearer token.
+    """
+    try:
+        body = await request.json()
+        model_name = body.get("model_name")
+
+        # Validate model_name is either a string or None
+        if model_name is not None and not isinstance(model_name, str):
+            raise HTTPException(
+                status_code=400,
+                detail="model_name must be a string or null"
+            )
+
+        # Set the model for this API key
+        user_manager.set_model_setting(user_info['api_key_id'], model_name)
+
+        logger.info(
+            f"User {user_info['username']} set model to {model_name} "
+            f"for API key {user_info['api_key_id']}"
+        )
+
+        return {
+            "success": True,
+            "api_key_id": user_info['api_key_id'],
+            "model_name": model_name,
+            "message": f"Model set to {model_name}" if model_name else "Using global default model"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error setting model: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to set model: {str(e)}")
 
 
 if __name__ == "__main__":

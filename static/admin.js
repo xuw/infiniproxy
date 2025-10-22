@@ -323,7 +323,7 @@ function displayAPIKeys(keysList) {
     if (keysList.length === 0) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="8" class="empty-state">
+                <td colspan="9" class="empty-state">
                     <div class="empty-state-icon">🔑</div>
                     <div>No API keys found. Create your first key above!</div>
                 </td>
@@ -338,6 +338,7 @@ function displayAPIKeys(keysList) {
             <td>${key.user_id}</td>
             <td><code class="key-display">${key.key_prefix}...</code></td>
             <td>${key.name || '-'}</td>
+            <td><code class="key-display">${key.model_name || 'Default'}</code></td>
             <td>${formatDate(key.created_at)}</td>
             <td>${key.last_used_at ? formatDate(key.last_used_at) : 'Never'}</td>
             <td>

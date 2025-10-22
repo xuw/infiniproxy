@@ -1,19 +1,18 @@
 {
   "permissions": {
     "allow": [
-      "Bash(docker push harbor.ai.iiis.co:9443/xuw/infiniproxy:latest)",
-      "Bash(kubectl delete pod -n weixu -l app=infiniproxy)",
-      "Bash(kubectl apply -f /Users/xuw/infiniproxy/k8s/deployment.yaml)",
-      "Bash(kubectl get:*)",
-      "Bash(kubectl describe:*)",
-      "Bash(docker inspect:*)",
       "Bash(docker buildx build:*)",
-      "Bash(kubectl:*)",
-      "Bash(curl -sk https://aiapi.iiis.co/health)",
-      "Bash(python tests/test_e2e_deployed.py)",
-      "Bash(curl -sk -X POST https://cloud.infini-ai.com/maas/v1/chat/completions )",
-      "Bash(cat /Users/xuw/infiniproxy/.gitignore)",
-      "Bash(git add .)"
+      "Bash(kubectl apply:*)",
+      "Bash(kubectl delete:*)",
+      "Bash(kubectl get:*)",
+      "Bash(kubectl logs:*)",
+      "Bash(curl:*)",
+      "Bash(python test_admin_session.py:*)",
+      "Bash(kubectl exec:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push)",
+      "Bash(chmod:*)"
     ],
     "deny": [],
     "ask": []
