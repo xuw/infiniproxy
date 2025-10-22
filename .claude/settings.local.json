@@ -12,7 +12,11 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(git push)",
-      "Bash(chmod:*)"
+      "Bash(chmod:*)",
+      "Bash(ssh:*)",
+      "Bash(kubectl rollout:*)",
+      "Bash(git push:*)",
+      "Bash(python set_model.py:*)"
     ],
     "deny": [],
     "ask": []

@@ -326,6 +326,88 @@ curl "http://localhost:8000/usage/me?start_date=2024-01-01T00:00:00&end_date=202
 }
 ```
 
+### 每个 API 密钥的模型设置
+
+每个 API 密钥都可以有自己的后端模型设置，允许不同用户通过同一个代理服务器使用不同的模型。
+
+#### `GET /settings/model`
+查询您的 API 密钥的模型设置。
+
+```bash
+curl http://localhost:8000/settings/model \
+  -H "Authorization: Bearer sk-abc123..."
+```
+
+响应：
+```json
+{
+  "api_key_id": 1,
+  "api_key_name": "Production Key",
+  "model_name": "gpt-4",
+  "using_default": false
+}
+```
+
+#### `PUT /settings/model`
+设置或取消设置 API 密钥的模型。
+
+```bash
+# 设置特定模型
+curl -X PUT http://localhost:8000/settings/model \
+  -H "Authorization: Bearer sk-abc123..." \
+  -H "Content-Type: application/json" \
+  -d '{"model_name": "gpt-4"}'
+
+# 取消设置以使用默认全局模型
+curl -X PUT http://localhost:8000/settings/model \
+  -H "Authorization: Bearer sk-abc123..." \
+  -H "Content-Type: application/json" \
+  -d '{"model_name": null}'
+```
+
+响应：
+```json
+{
+  "success": true,
+  "api_key_id": 1,
+  "model_name": "gpt-4",
+  "message": "Model set to gpt-4"
+}
+```
+
+#### 客户端脚本：`set_model.py`
+
+提供了一个方便的客户端脚本来从命令行管理模型设置：
+
+```bash
+# 如果尚未安装，请安装 python-dotenv
+pip install python-dotenv
+
+# 检查当前模型设置
+python set_model.py --check
+
+# 将模型设置为 gpt-4
+python set_model.py gpt-4
+
+# 将模型设置为 claude-3-5-sonnet
+python set_model.py claude-3-5-sonnet-20241022
+
+# 取消设置模型（使用默认）
+python set_model.py --unset
+
+# 使用不同的 .env 文件
+python set_model.py --env-file .env.production gpt-4
+
+# 使用不同的基础 URL
+python set_model.py --url https://different-url.com gpt-4
+```
+
+脚本从 `.env` 文件中读取您的 API 密钥：
+```bash
+# .env 文件
+OPENAI_API_KEY=sk-abc123...
+```
+
 ### 管理端点
 
 #### `POST /admin/users`

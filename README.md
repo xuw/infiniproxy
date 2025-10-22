@@ -326,6 +326,88 @@ Response:
 }
 ```
 
+### Per-API-Key Model Settings
+
+Each API key can have its own backend model setting, allowing different users to use different models through the same proxy server.
+
+#### `GET /settings/model`
+Query the model setting for your API key.
+
+```bash
+curl http://localhost:8000/settings/model \
+  -H "Authorization: Bearer sk-abc123..."
+```
+
+Response:
+```json
+{
+  "api_key_id": 1,
+  "api_key_name": "Production Key",
+  "model_name": "gpt-4",
+  "using_default": false
+}
+```
+
+#### `PUT /settings/model`
+Set or unset the model for your API key.
+
+```bash
+# Set a specific model
+curl -X PUT http://localhost:8000/settings/model \
+  -H "Authorization: Bearer sk-abc123..." \
+  -H "Content-Type: application/json" \
+  -d '{"model_name": "gpt-4"}'
+
+# Unset to use default global model
+curl -X PUT http://localhost:8000/settings/model \
+  -H "Authorization: Bearer sk-abc123..." \
+  -H "Content-Type: application/json" \
+  -d '{"model_name": null}'
+```
+
+Response:
+```json
+{
+  "success": true,
+  "api_key_id": 1,
+  "model_name": "gpt-4",
+  "message": "Model set to gpt-4"
+}
+```
+
+#### Client Script: `set_model.py`
+
+A convenient client script is provided to manage model settings from the command line:
+
+```bash
+# Install python-dotenv if not already installed
+pip install python-dotenv
+
+# Check current model setting
+python set_model.py --check
+
+# Set model to gpt-4
+python set_model.py gpt-4
+
+# Set model to claude-3-5-sonnet
+python set_model.py claude-3-5-sonnet-20241022
+
+# Unset model (use default)
+python set_model.py --unset
+
+# Use different .env file
+python set_model.py --env-file .env.production gpt-4
+
+# Use different base URL
+python set_model.py --url https://different-url.com gpt-4
+```
+
+The script reads your API key from a `.env` file:
+```bash
+# .env file
+OPENAI_API_KEY=sk-abc123...
+```
+
 ### Admin Endpoints
 
 #### `POST /admin/users`
