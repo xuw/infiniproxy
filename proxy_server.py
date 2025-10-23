@@ -346,6 +346,10 @@ async def chat_completions(
         if user_info.get('model_name') and not original_had_model:
             openai_request['model'] = user_info['model_name']
             logger.info(f"Using per-key model: {user_info['model_name']}")
+        elif not original_had_model:
+            # No client model and no per-key model, use global default
+            openai_request['model'] = config.openai_model
+            logger.info(f"Using global default model: {config.openai_model}")
 
         # Pass through to OpenAI backend with fallback
         logger.info("🔄 Passing through to OpenAI backend...")
@@ -500,6 +504,10 @@ async def create_message(
         if user_info.get('model_name') and not client_specified_model:
             openai_request['model'] = user_info['model_name']
             logger.info(f"Using per-key model: {user_info['model_name']}")
+        elif not client_specified_model:
+            # No client model and no per-key model, use global default
+            openai_request['model'] = config.openai_model
+            logger.info(f"Using global default model: {config.openai_model}")
 
         logger.debug(f"Translated to OpenAI request: {json.dumps(openai_request, indent=2)}")
 
