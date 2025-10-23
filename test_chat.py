@@ -42,12 +42,14 @@ def send_claude_format(base_url, api_key, message, model, max_tokens, stream):
     url = f"{base_url}/v1/messages"
 
     payload = {
-        "model": model,
         "max_tokens": max_tokens,
         "messages": [
             {"role": "user", "content": message}
         ]
     }
+
+    if model:
+        payload["model"] = model
 
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -60,7 +62,7 @@ def send_claude_format(base_url, api_key, message, model, max_tokens, stream):
 
     print(f"📤 Sending to: {url}")
     print(f"📝 Message: {message}")
-    print(f"🤖 Model: {model}")
+    print(f"🤖 Model: {model if model else 'server default'}")
     print(f"⏳ Waiting for response...\n")
 
     start_time = time.time()
@@ -140,12 +142,14 @@ def send_openai_format(base_url, api_key, message, model, max_tokens, stream):
     url = f"{base_url}/v1/chat/completions"
 
     payload = {
-        "model": model,
         "max_tokens": max_tokens,
         "messages": [
             {"role": "user", "content": message}
         ]
     }
+
+    if model:
+        payload["model"] = model
 
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -157,7 +161,7 @@ def send_openai_format(base_url, api_key, message, model, max_tokens, stream):
 
     print(f"📤 Sending to: {url}")
     print(f"📝 Message: {message}")
-    print(f"🤖 Model: {model}")
+    print(f"🤖 Model: {model if model else 'server default'}")
     print(f"⏳ Waiting for response...\n")
 
     start_time = time.time()
@@ -275,8 +279,8 @@ Examples:
 
     parser.add_argument(
         '--model',
-        default='claude-3-5-sonnet-20241022',
-        help='Model name (default: claude-3-5-sonnet-20241022)'
+        default=None,
+        help='Model name (default: use server per-key or global default)'
     )
 
     parser.add_argument(
