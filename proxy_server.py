@@ -338,15 +338,30 @@ async def chat_completions(
 
         logger.debug(f"Full OpenAI request: {json.dumps(openai_request, indent=2)}")
 
+        # Determine fallback model (per-key or global default)
+        fallback_model = user_info.get('model_name') or config.openai_model
+        client_specified_model = original_had_model
+
         # Use per-key model if set and model not explicitly provided in request
         if user_info.get('model_name') and not original_had_model:
             openai_request['model'] = user_info['model_name']
             logger.info(f"Using per-key model: {user_info['model_name']}")
 
-        # Pass through to OpenAI backend
+        # Pass through to OpenAI backend with fallback
         logger.info("🔄 Passing through to OpenAI backend...")
-        openai_response = await openai_client.create_completion(openai_request)
-        request_id = openai_response.get("id")
+        try:
+            openai_response = await openai_client.create_completion(openai_request)
+            request_id = openai_response.get("id")
+        except Exception as e:
+            # Check if this is a model not found error and client specified a model
+            error_str = str(e).lower()
+            if client_specified_model and ('model' in error_str and ('not found' in error_str or 'does not exist' in error_str or 'invalid' in error_str)):
+                logger.warning(f"⚠️  Client-specified model '{openai_request.get('model')}' not found, falling back to: {fallback_model}")
+                openai_request['model'] = fallback_model
+                openai_response = await openai_client.create_completion(openai_request)
+                request_id = openai_response.get("id")
+            else:
+                raise
 
         logger.debug(f"OpenAI response: {json.dumps(openai_response, indent=2)}")
 
@@ -457,20 +472,37 @@ async def create_message(
 
         logger.debug(f"Full Claude request: {json.dumps(claude_request, indent=2)}")
 
+        # Check if client specified a model in the original request
+        client_specified_model = 'model' in claude_request
+
         # Translate to OpenAI format (will always use non-streaming)
         openai_request = translator.translate_request_to_openai(claude_request)
 
-        # Use per-key model if set, otherwise use global default
-        if user_info.get('model_name'):
+        # Determine fallback model (per-key or global default)
+        fallback_model = user_info.get('model_name') or config.openai_model
+
+        # Use per-key model if set and client didn't specify one
+        if user_info.get('model_name') and not client_specified_model:
             openai_request['model'] = user_info['model_name']
             logger.info(f"Using per-key model: {user_info['model_name']}")
 
         logger.debug(f"Translated to OpenAI request: {json.dumps(openai_request, indent=2)}")
 
-        # Always use non-streaming on OpenAI side
+        # Always use non-streaming on OpenAI side with fallback
         logger.info("🔄 Processing non-streaming request...")
-        openai_response = await openai_client.create_completion(openai_request)
-        request_id = openai_response.get("id")
+        try:
+            openai_response = await openai_client.create_completion(openai_request)
+            request_id = openai_response.get("id")
+        except Exception as e:
+            # Check if this is a model not found error and client specified a model
+            error_str = str(e).lower()
+            if client_specified_model and ('model' in error_str and ('not found' in error_str or 'does not exist' in error_str or 'invalid' in error_str)):
+                logger.warning(f"⚠️  Client-specified model '{openai_request.get('model')}' not found, falling back to: {fallback_model}")
+                openai_request['model'] = fallback_model
+                openai_response = await openai_client.create_completion(openai_request)
+                request_id = openai_response.get("id")
+            else:
+                raise
 
         logger.debug(f"OpenAI response: {json.dumps(openai_response, indent=2)}")
 
