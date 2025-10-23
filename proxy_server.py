@@ -354,8 +354,23 @@ async def chat_completions(
             request_id = openai_response.get("id")
         except Exception as e:
             # Check if this is a model not found error and client specified a model
+            is_model_error = False
+
+            # Check exception message
             error_str = str(e).lower()
-            if client_specified_model and ('model' in error_str and ('not found' in error_str or 'does not exist' in error_str or 'invalid' in error_str)):
+            if 'model' in error_str and ('not found' in error_str or 'does not exist' in error_str or 'invalid' in error_str):
+                is_model_error = True
+
+            # Also check response body if it's an HTTPStatusError
+            if hasattr(e, 'response') and e.response:
+                try:
+                    response_body = e.response.text.lower()
+                    if 'model' in response_body and ('not found' in response_body or 'does not exist' in response_body or 'no access' in response_body):
+                        is_model_error = True
+                except:
+                    pass
+
+            if client_specified_model and is_model_error:
                 logger.warning(f"⚠️  Client-specified model '{openai_request.get('model')}' not found, falling back to: {fallback_model}")
                 openai_request['model'] = fallback_model
                 openai_response = await openai_client.create_completion(openai_request)
@@ -495,8 +510,23 @@ async def create_message(
             request_id = openai_response.get("id")
         except Exception as e:
             # Check if this is a model not found error and client specified a model
+            is_model_error = False
+
+            # Check exception message
             error_str = str(e).lower()
-            if client_specified_model and ('model' in error_str and ('not found' in error_str or 'does not exist' in error_str or 'invalid' in error_str)):
+            if 'model' in error_str and ('not found' in error_str or 'does not exist' in error_str or 'invalid' in error_str):
+                is_model_error = True
+
+            # Also check response body if it's an HTTPStatusError
+            if hasattr(e, 'response') and e.response:
+                try:
+                    response_body = e.response.text.lower()
+                    if 'model' in response_body and ('not found' in response_body or 'does not exist' in response_body or 'no access' in response_body):
+                        is_model_error = True
+                except:
+                    pass
+
+            if client_specified_model and is_model_error:
                 logger.warning(f"⚠️  Client-specified model '{openai_request.get('model')}' not found, falling back to: {fallback_model}")
                 openai_request['model'] = fallback_model
                 openai_response = await openai_client.create_completion(openai_request)
