@@ -461,6 +461,37 @@ source venv/bin/activate
 python test_api.py
 ```
 
+#### Quick Chat Testing: `test_chat.py`
+
+A convenient test client for sending single messages:
+
+```bash
+# Simple message (Claude format)
+python test_chat.py "Hello, how are you?"
+
+# OpenAI format
+python test_chat.py "Hello!" --format openai
+
+# Custom model
+python test_chat.py "Explain quantum computing" --model gpt-4
+
+# More tokens for longer responses
+python test_chat.py "Write a short story" --max-tokens 2000
+
+# Streaming response
+python test_chat.py "Count to 10" --stream
+
+# Test against local server
+python test_chat.py "Test message" --url http://localhost:8000
+```
+
+**Features:**
+- Reads API key from `.env` file automatically
+- Supports both Claude and OpenAI API formats
+- Streaming and non-streaming modes
+- Shows token usage and response time
+- Pretty formatted output
+
 ## API Translation Details
 
 ### Request Translation (Claude → OpenAI)

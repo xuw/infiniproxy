@@ -16,7 +16,8 @@
       "Bash(ssh:*)",
       "Bash(kubectl rollout:*)",
       "Bash(git push:*)",
-      "Bash(python set_model.py:*)"
+      "Bash(python set_model.py:*)",
+      "Bash(python test_chat.py:*)"
     ],
     "deny": [],
     "ask": []

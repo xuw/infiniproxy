@@ -461,6 +461,37 @@ source venv/bin/activate
 python test_api.py
 ```
 
+#### 快速聊天测试：`test_chat.py`
+
+一个方便的测试客户端，用于发送单条消息：
+
+```bash
+# 简单消息（Claude 格式）
+python test_chat.py "你好，最近怎么样？"
+
+# OpenAI 格式
+python test_chat.py "你好！" --format openai
+
+# 自定义模型
+python test_chat.py "解释量子计算" --model gpt-4
+
+# 更多令牌以获得更长的响应
+python test_chat.py "写一个短篇故事" --max-tokens 2000
+
+# 流式响应
+python test_chat.py "数到 10" --stream
+
+# 测试本地服务器
+python test_chat.py "测试消息" --url http://localhost:8000
+```
+
+**功能特性：**
+- 自动从 `.env` 文件读取 API 密钥
+- 支持 Claude 和 OpenAI API 格式
+- 流式和非流式模式
+- 显示令牌使用和响应时间
+- 美观的格式化输出
+
 ## API 转换详情
 
 ### 请求转换（Claude → OpenAI）
