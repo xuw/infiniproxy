@@ -19,6 +19,7 @@ from translator import APITranslator
 from openai_client import OpenAIClient
 from user_manager import UserManager
 from email_sender import EmailSender
+from backend_manager import BackendManager
 import admin_auth
 
 # Configure logging
@@ -48,6 +49,7 @@ translator: APITranslator = None
 openai_client: OpenAIClient = None
 user_manager: UserManager = None
 email_sender: EmailSender = None
+backend_manager: BackendManager = None
 
 # Security
 security = HTTPBearer(auto_error=False)
@@ -112,7 +114,7 @@ async def verify_admin_session(admin_session: Optional[str] = Cookie(None)):
 @app.on_event("startup")
 async def startup_event():
     """Initialize the proxy on startup."""
-    global config, translator, openai_client, user_manager, email_sender
+    global config, translator, openai_client, user_manager, email_sender, backend_manager
 
     logger.info("Starting OpenAI to Claude API Proxy...")
 
@@ -146,6 +148,10 @@ async def startup_event():
     db_path = os.path.join(db_dir, "proxy_users.db")
     user_manager = UserManager(db_path=db_path)
     logger.info(f"User manager initialized with database at {db_path}")
+
+    # Initialize backend manager for multiple backend services
+    backend_manager = BackendManager(db_path=db_path)
+    logger.info(f"Backend manager initialized with database at {db_path}")
 
     # Initialize email sender for API key notifications
     email_sender = EmailSender()
@@ -1186,6 +1192,188 @@ async def get_user_usage_by_backend_endpoint(user_id: int):
     """
     usage = user_manager.get_user_usage_by_backend(user_id)
     return usage
+
+
+# ===== Backend Management Admin Endpoints =====
+
+@app.get("/admin/backends")
+async def list_backends_endpoint(
+    active_only: bool = False,
+    session: str = Depends(verify_admin_session)
+):
+    """
+    List all backend services.
+
+    Query params:
+        active_only: If true, only return active backends
+    """
+    backends = backend_manager.list_backends(active_only=active_only)
+    return backends
+
+
+@app.post("/admin/backends")
+async def create_backend_endpoint(
+    request: Request,
+    session: str = Depends(verify_admin_session)
+):
+    """
+    Create a new backend service.
+
+    Body:
+        short_name: Short identifier (e.g., "inf", "zhipu", "sf")
+        name: Display name
+        base_url: API base URL
+        api_key: API key for the backend
+        default_model: Default model for this backend (optional)
+        is_default: Whether this is the default backend (optional)
+    """
+    data = await request.json()
+
+    try:
+        backend_id = backend_manager.create_backend(
+            short_name=data['short_name'],
+            name=data['name'],
+            base_url=data['base_url'],
+            api_key=data['api_key'],
+            default_model=data.get('default_model'),
+            is_default=data.get('is_default', False)
+        )
+
+        return {
+            "success": True,
+            "backend_id": backend_id,
+            "message": f"Backend '{data['short_name']}' created successfully"
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except KeyError as e:
+        raise HTTPException(status_code=400, detail=f"Missing required field: {str(e)}")
+
+
+@app.get("/admin/backends/{backend_id}")
+async def get_backend_endpoint(
+    backend_id: int,
+    session: str = Depends(verify_admin_session)
+):
+    """Get details of a specific backend service."""
+    backend = backend_manager.get_backend(backend_id)
+
+    if not backend:
+        raise HTTPException(status_code=404, detail=f"Backend {backend_id} not found")
+
+    return backend
+
+
+@app.put("/admin/backends/{backend_id}")
+async def update_backend_endpoint(
+    backend_id: int,
+    request: Request,
+    session: str = Depends(verify_admin_session)
+):
+    """
+    Update a backend service.
+
+    Body (all fields optional):
+        short_name: Short identifier
+        name: Display name
+        base_url: API base URL
+        api_key: API key
+        default_model: Default model
+        is_active: Active status
+        is_default: Default backend status
+    """
+    data = await request.json()
+
+    try:
+        success = backend_manager.update_backend(
+            backend_id=backend_id,
+            short_name=data.get('short_name'),
+            name=data.get('name'),
+            base_url=data.get('base_url'),
+            api_key=data.get('api_key'),
+            default_model=data.get('default_model'),
+            is_active=data.get('is_active'),
+            is_default=data.get('is_default')
+        )
+
+        if not success:
+            raise HTTPException(status_code=404, detail=f"Backend {backend_id} not found")
+
+        return {
+            "success": True,
+            "message": f"Backend {backend_id} updated successfully"
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/admin/backends/{backend_id}")
+async def delete_backend_endpoint(
+    backend_id: int,
+    session: str = Depends(verify_admin_session)
+):
+    """
+    Delete a backend service.
+
+    WARNING: This will fail if any API keys are using this backend.
+    Consider setting is_active=False instead.
+    """
+    try:
+        success = backend_manager.delete_backend(backend_id)
+
+        if not success:
+            raise HTTPException(status_code=404, detail=f"Backend {backend_id} not found")
+
+        return {
+            "success": True,
+            "message": f"Backend {backend_id} deleted successfully"
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/admin/backends/{backend_id}/models")
+async def list_backend_models_endpoint(
+    backend_id: int,
+    session: str = Depends(verify_admin_session)
+):
+    """
+    List available models from a specific backend service.
+
+    This makes a request to the backend's /v1/models endpoint.
+    """
+    backend = backend_manager.get_backend(backend_id)
+
+    if not backend:
+        raise HTTPException(status_code=404, detail=f"Backend {backend_id} not found")
+
+    try:
+        # Construct models URL
+        base_url = backend['base_url']
+        if '/chat/completions' in base_url:
+            models_url = base_url.replace('/chat/completions', '/models')
+        elif '/messages' in base_url:
+            models_url = base_url.replace('/messages', '/models')
+        else:
+            models_url = f"{base_url}/models"
+
+        # Make request to backend
+        headers = {
+            "Authorization": f"Bearer {backend['api_key']}",
+            "Content-Type": "application/json"
+        }
+
+        response = requests.get(models_url, headers=headers, timeout=10)
+        response.raise_for_status()
+
+        return response.json()
+
+    except requests.RequestException as e:
+        logger.error(f"Failed to fetch models from backend {backend_id}: {e}")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to fetch models from backend: {str(e)}"
+        )
 
 
 @app.get("/settings/model")
