@@ -56,12 +56,23 @@ API 密钥: {api_key}
 3. 如果密钥丢失，请联系管理员重新生成
 
 使用方法：
+
+1. API 请求方式
 在您的 API 请求中添加以下 Header：
 Authorization: Bearer {api_key}
 
 服务地址：
 - OpenAI 格式: https://aiapi.iiis.co:9443/v1/chat/completions
 - Claude 格式: https://aiapi.iiis.co:9443/v1/messages
+
+2. Claude Code 配置方式
+在终端中执行以下命令配置 Claude Code：
+
+export ANTHROPIC_AUTH_TOKEN={api_key}
+export ANTHROPIC_BASE_URL=https://aiapi.iiis.co:9443
+claude
+
+提示：将上述 export 命令添加到 ~/.bashrc 或 ~/.zshrc 以永久生效。
 
 如有任何问题，请联系管理员。
 
@@ -117,14 +128,23 @@ InfiniProxy 系统
 
             <div class="info">
                 <h2>使用方法</h2>
+
+                <h3>1. API 请求方式</h3>
                 <p>在您的 API 请求中添加以下 Header：</p>
                 <code>Authorization: Bearer {api_key}</code>
 
-                <h3>服务地址</h3>
+                <h4>服务地址</h4>
                 <ul>
                     <li><strong>OpenAI 格式：</strong> <code>https://aiapi.iiis.co:9443/v1/chat/completions</code></li>
                     <li><strong>Claude 格式：</strong> <code>https://aiapi.iiis.co:9443/v1/messages</code></li>
                 </ul>
+
+                <h3>2. Claude Code 配置方式</h3>
+                <p>在终端中执行以下命令配置 Claude Code：</p>
+                <pre style="background-color: #2d3748; color: #e2e8f0; padding: 15px; border-radius: 5px; overflow-x: auto;">export ANTHROPIC_AUTH_TOKEN={api_key}
+export ANTHROPIC_BASE_URL=https://aiapi.iiis.co:9443
+claude</pre>
+                <p><strong>提示：</strong>将上述 export 命令添加到 <code>~/.bashrc</code> 或 <code>~/.zshrc</code> 以永久生效。</p>
             </div>
 
             <p>如有任何问题，请联系管理员。</p>
