@@ -21,7 +21,10 @@
       "Bash(git reset:*)",
       "Bash(cat:*)",
       "Bash(python test_admin_features.py:*)",
-      "Bash(timeout 30 python:*)"
+      "Bash(timeout 30 python:*)",
+      "Bash(git log:*)",
+      "Bash(xargs -I {} git grep -i \"wsxST613\" {})",
+      "Bash(kubectl patch:*)"
     ],
     "deny": [],
     "ask": []
