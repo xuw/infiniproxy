@@ -8,12 +8,13 @@ import requests
 import json
 import sys
 import time
+import os
 from typing import Dict, Optional
 
 # Configuration
 BASE_URL = "https://aiapi.iiis.co:9443"
-ADMIN_USERNAME = "admin"
-ADMIN_PASSWORD = "changeme"  # Default from deployment
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "changeme")
 
 # Disable SSL warnings for self-signed certs (if any)
 import urllib3

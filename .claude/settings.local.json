@@ -1,23 +1,25 @@
 {
   "permissions": {
     "allow": [
+      "Bash(python -c:*)",
+      "Bash(python test_response_model.py:*)",
+      "Bash(python -m json.tool:*)",
+      "Bash(docker buildx build --platform linux/amd64 -t harbor.ai.iiis.co:9443/infiniproxy:latest --push .)",
       "Bash(docker buildx build:*)",
-      "Bash(kubectl apply:*)",
-      "Bash(kubectl delete:*)",
+      "Bash(kubectl rollout:*)",
       "Bash(kubectl get:*)",
       "Bash(kubectl logs:*)",
       "Bash(curl:*)",
-      "Bash(python test_admin_session.py:*)",
       "Bash(kubectl exec:*)",
+      "Bash(python test_chat.py:*)",
+      "WebFetch(domain:docs.infini-ai.com)",
+      "Bash(python set_model.py:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(git push)",
-      "Bash(chmod:*)",
-      "Bash(ssh:*)",
-      "Bash(kubectl rollout:*)",
       "Bash(git push:*)",
-      "Bash(python set_model.py:*)",
-      "Bash(python test_chat.py:*)"
+      "Bash(kubectl apply:*)",
+      "Bash(git reset:*)",
+      "Bash(cat:*)"
     ],
     "deny": [],
     "ask": []
