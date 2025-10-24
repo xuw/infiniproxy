@@ -669,28 +669,28 @@ async def create_message(
         if is_streaming_requested:
             openai_request['stream'] = True
 
-        # Determine fallback model (per-key or global default)
-        fallback_model = user_info.get('model_name') or config.openai_model
+        # Resolve backend and model
+        # Priority: 1) Explicit model from request 2) Per-key model setting
+        requested_model = claude_request.get('model') if client_specified_model else user_info.get('model_name')
+        backend, resolved_model, backend_client = resolve_backend_and_model(requested_model, user_info)
 
-        # Use per-key model if set and client didn't specify one
-        if user_info.get('model_name') and not client_specified_model:
-            openai_request['model'] = user_info['model_name']
-            logger.info(f"Using per-key model: {user_info['model_name']}")
-        elif not client_specified_model:
-            # No client model and no per-key model, use global default
-            openai_request['model'] = config.openai_model
-            logger.info(f"Using global default model: {config.openai_model}")
+        # Update request with resolved model
+        openai_request['model'] = resolved_model
+        logger.info(f"Resolved backend: {backend.get('short_name', 'default')} | Model: {resolved_model}")
+
+        # Store for fallback and usage tracking
+        fallback_model = resolved_model
 
         logger.debug(f"Translated to OpenAI request: {json.dumps(openai_request, indent=2)}")
 
         # Handle streaming vs non-streaming
         if is_streaming_requested:
-            logger.info("🔄 Processing streaming request (Claude format -> OpenAI stream pass-through)...")
+            logger.info(f"🔄 Processing streaming request via {backend.get('name', 'default')}...")
 
             async def stream_generator():
                 """Generator for streaming responses."""
                 try:
-                    async for line in openai_client.create_streaming_completion(openai_request):
+                    async for line in backend_client.create_streaming_completion(openai_request):
                         # Pass through OpenAI format stream
                         # Note: For full Claude compatibility, would need to translate each chunk
                         yield f"{line}\n"
@@ -709,9 +709,9 @@ async def create_message(
             )
 
         # Non-streaming path
-        logger.info("🔄 Processing non-streaming request...")
+        logger.info(f"🔄 Processing via backend: {backend.get('name', 'default')}...")
         try:
-            openai_response = await openai_client.create_completion(openai_request)
+            openai_response = await backend_client.create_completion(openai_request)
             request_id = openai_response.get("id")
         except Exception as e:
             # Check if this is a model not found error and client specified a model
@@ -734,7 +734,7 @@ async def create_message(
             if client_specified_model and is_model_error:
                 logger.warning(f"⚠️  Client-specified model '{openai_request.get('model')}' not found, falling back to: {fallback_model}")
                 openai_request['model'] = fallback_model
-                openai_response = await openai_client.create_completion(openai_request)
+                openai_response = await backend_client.create_completion(openai_request)
                 request_id = openai_response.get("id")
             else:
                 raise
@@ -781,7 +781,7 @@ async def create_message(
             output_tokens=output_tokens,
             model=backend_model,
             request_id=request_id,
-            backend_url=config.openai_base_url
+            backend_url=backend.get('base_url', config.openai_base_url)
         )
         logger.info(f"✅ Usage tracked for user {user_info['username']}")
 
