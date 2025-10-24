@@ -70,15 +70,82 @@ def get_current_model(base_url, api_key):
         return None
 
 
-def list_backend_models(base_url, api_key):
+def list_backends(base_url, api_key):
+    """List all available backend services."""
+    try:
+        response = requests.get(
+            f"{base_url}/admin/backends",
+            headers={"Authorization": f"Bearer {api_key}"},
+            params={"active_only": True},
+            verify=False
+        )
+
+        if response.status_code == 200:
+            backends = response.json()
+            print("📋 Available Backend Services:")
+            print("=" * 80)
+
+            if not backends:
+                print("No backends configured")
+                return []
+
+            for backend in backends:
+                short_name = backend.get('short_name', 'unknown')
+                name = backend.get('name', 'Unknown')
+                base_url_backend = backend.get('base_url', '')
+                default_model = backend.get('default_model', 'N/A')
+                is_default = backend.get('is_default', 0)
+
+                default_marker = " [DEFAULT]" if is_default else ""
+                print(f"• {short_name}{default_marker}: {name}")
+                print(f"  URL: {base_url_backend}")
+                print(f"  Default Model: {default_model}")
+                print()
+
+            return backends
+        else:
+            print(f"❌ Failed to list backends: {response.status_code}")
+            print(f"   Response: {response.text}")
+            return None
+    except Exception as e:
+        print(f"❌ Error listing backends: {e}")
+        return None
+
+
+def list_backend_models(base_url, api_key, backend_name=None):
     """List all models available from the backend via proxy."""
     try:
-        models_url = f"{base_url}/v1/models"
+        if backend_name:
+            # First get the backend ID
+            backends_response = requests.get(
+                f"{base_url}/admin/backends",
+                headers={"Authorization": f"Bearer {api_key}"},
+                params={"active_only": True},
+                verify=False
+            )
 
-        print(f"🔍 Querying models from proxy: {models_url}")
+            if backends_response.status_code != 200:
+                print(f"❌ Failed to get backends: {backends_response.status_code}")
+                return None
+
+            backends = backends_response.json()
+            backend = next((b for b in backends if b['short_name'] == backend_name), None)
+
+            if not backend:
+                print(f"❌ Backend '{backend_name}' not found")
+                print(f"   Available backends: {', '.join(b['short_name'] for b in backends)}")
+                return None
+
+            backend_id = backend['id']
+            models_url = f"{base_url}/admin/backends/{backend_id}/models"
+            print(f"🔍 Querying models from backend '{backend_name}': {models_url}")
+        else:
+            models_url = f"{base_url}/v1/models"
+            print(f"🔍 Querying models from default backend: {models_url}")
+
         print()
 
-        # Query the proxy's models endpoint
+        # Query the models endpoint
         models_response = requests.get(
             models_url,
             headers={
@@ -171,18 +238,24 @@ def set_model(base_url, api_key, model_name):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Set model for an API key",
+        description="Set model and backend for an API key",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # List all available models from backend
+  # List all available backends
+  python set_model.py --list-backends
+
+  # List all available models from default backend
   python set_model.py --list-models
+
+  # List models from specific backend
+  python set_model.py --list-models --backend zhipu
 
   # Set model to gpt-4
   python set_model.py gpt-4
 
-  # Set model to claude-3-5-sonnet
-  python set_model.py claude-3-5-sonnet-20241022
+  # Set model with backend prefix (backend/model format)
+  python set_model.py zhipu/glm-4.6
 
   # Unset model (use default)
   python set_model.py --unset
@@ -201,7 +274,7 @@ Examples:
     parser.add_argument(
         'model',
         nargs='?',
-        help='Model name to set (e.g., gpt-4, claude-3-opus, glm-4.6)'
+        help='Model name to set (e.g., gpt-4, claude-3-opus, zhipu/glm-4.6)'
     )
 
     parser.add_argument(
@@ -217,9 +290,20 @@ Examples:
     )
 
     parser.add_argument(
+        '--list-backends',
+        action='store_true',
+        help='List all available backend services'
+    )
+
+    parser.add_argument(
         '--list-models',
         action='store_true',
         help='List all models available from the backend'
+    )
+
+    parser.add_argument(
+        '--backend',
+        help='Backend short name (used with --list-models)'
     )
 
     parser.add_argument(
@@ -260,10 +344,23 @@ Examples:
         # Just checking, exit
         return 0 if current else 1
 
+    if args.list_backends:
+        # List available backend services
+        print()
+        backends = list_backends(args.url, api_key)
+        print()
+        print("="*80)
+        if backends is not None:
+            print(f"✅ Found {len(backends)} backend service(s)")
+        else:
+            print("❌ Failed to list backends")
+        print("="*80)
+        return 0 if backends is not None else 1
+
     if args.list_models:
         # List available models from backend via proxy
         print()
-        models = list_backend_models(args.url, api_key)
+        models = list_backend_models(args.url, api_key, backend_name=args.backend)
         print()
         print("="*80)
         if models is not None:
