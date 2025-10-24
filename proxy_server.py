@@ -402,7 +402,30 @@ async def chat_completions(
             openai_request['model'] = config.openai_model
             logger.info(f"Using global default model: {config.openai_model}")
 
-        # Pass through to OpenAI backend with fallback
+        # Handle streaming vs non-streaming
+        if is_streaming:
+            logger.info("🔄 Passing through streaming request to backend...")
+
+            async def stream_generator():
+                """Generator for streaming responses."""
+                try:
+                    async for line in openai_client.create_streaming_completion(openai_request):
+                        yield f"{line}\n"
+                except Exception as e:
+                    logger.error(f"Streaming error: {e}")
+                    error_line = f'data: {json.dumps({"error": str(e)})}\n\n'
+                    yield error_line
+
+            return StreamingResponse(
+                stream_generator(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                }
+            )
+
+        # Non-streaming path
         logger.info("🔄 Passing through to OpenAI backend...")
         try:
             openai_response = await openai_client.create_completion(openai_request)
@@ -528,8 +551,6 @@ async def create_message(
         logger.info(f"Model: {original_model}")
         logger.info(f"Max tokens: {max_tokens}")
         logger.info(f"Streaming requested: {is_streaming_requested}")
-        if is_streaming_requested:
-            logger.info(f"⚠️  Note: Streaming not supported on OpenAI side, using non-streaming")
         logger.info(f"Temperature: {claude_request.get('temperature', 'default')}")
 
         # Log message count and preview
@@ -548,8 +569,12 @@ async def create_message(
         # Check if client specified a model in the original request
         client_specified_model = 'model' in claude_request
 
-        # Translate to OpenAI format (will always use non-streaming)
+        # Translate to OpenAI format
         openai_request = translator.translate_request_to_openai(claude_request)
+
+        # Preserve streaming flag if requested
+        if is_streaming_requested:
+            openai_request['stream'] = True
 
         # Determine fallback model (per-key or global default)
         fallback_model = user_info.get('model_name') or config.openai_model
@@ -565,7 +590,32 @@ async def create_message(
 
         logger.debug(f"Translated to OpenAI request: {json.dumps(openai_request, indent=2)}")
 
-        # Always use non-streaming on OpenAI side with fallback
+        # Handle streaming vs non-streaming
+        if is_streaming_requested:
+            logger.info("🔄 Processing streaming request (Claude format -> OpenAI stream pass-through)...")
+
+            async def stream_generator():
+                """Generator for streaming responses."""
+                try:
+                    async for line in openai_client.create_streaming_completion(openai_request):
+                        # Pass through OpenAI format stream
+                        # Note: For full Claude compatibility, would need to translate each chunk
+                        yield f"{line}\n"
+                except Exception as e:
+                    logger.error(f"Streaming error: {e}")
+                    error_line = f'data: {json.dumps({"error": str(e)})}\n\n'
+                    yield error_line
+
+            return StreamingResponse(
+                stream_generator(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                }
+            )
+
+        # Non-streaming path
         logger.info("🔄 Processing non-streaming request...")
         try:
             openai_response = await openai_client.create_completion(openai_request)

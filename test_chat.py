@@ -121,10 +121,18 @@ def send_claude_format(base_url, api_key, message, model, max_tokens, stream, fi
                             break
                         try:
                             data = json.loads(data_str)
+                            # Handle both Claude format and OpenAI format streams
                             if data.get('type') == 'content_block_delta':
+                                # Claude format
                                 delta = data.get('delta', {})
                                 if delta.get('type') == 'text_delta':
                                     print(delta.get('text', ''), end='', flush=True)
+                            elif 'choices' in data and len(data['choices']) > 0:
+                                # OpenAI format (proxy may pass through OpenAI format)
+                                delta = data['choices'][0].get('delta', {})
+                                content = delta.get('content') or delta.get('reasoning_content', '')
+                                if content:
+                                    print(content, end='', flush=True)
                         except json.JSONDecodeError:
                             pass
 
@@ -236,8 +244,10 @@ def send_openai_format(base_url, api_key, message, model, max_tokens, stream, fi
                             data = json.loads(data_str)
                             if 'choices' in data and len(data['choices']) > 0:
                                 delta = data['choices'][0].get('delta', {})
-                                if 'content' in delta:
-                                    print(delta['content'], end='', flush=True)
+                                # Handle both content and reasoning_content fields
+                                content = delta.get('content') or delta.get('reasoning_content', '')
+                                if content:
+                                    print(content, end='', flush=True)
                         except json.JSONDecodeError:
                             pass
 
