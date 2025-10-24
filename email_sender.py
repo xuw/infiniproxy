@@ -17,12 +17,19 @@ class EmailSender:
 
     def __init__(self):
         """Initialize email sender with SMTP configuration."""
-        # SMTP Configuration from environment or defaults
+        # SMTP Configuration from environment variables
         self.smtp_server = os.getenv("SMTP_SERVER", "mail.tsinghua.edu.cn")
         self.smtp_port = int(os.getenv("SMTP_PORT", "465"))
         self.smtp_user = os.getenv("SMTP_USER", "weixu@tsinghua.edu.cn")
-        self.smtp_password = os.getenv("SMTP_PASSWORD", "r4bBkYZ28Y943awR")
+        self.smtp_password = os.getenv("SMTP_PASSWORD")
         self.use_ssl = os.getenv("SMTP_USE_SSL", "true").lower() == "true"
+
+        # Validate required SMTP password
+        if not self.smtp_password:
+            raise ValueError(
+                "SMTP_PASSWORD environment variable is required for email notifications. "
+                "Please set it in your Kubernetes secret or environment configuration."
+            )
 
         logger.info(f"Email sender initialized: {self.smtp_server}:{self.smtp_port} (SSL: {self.use_ssl})")
 

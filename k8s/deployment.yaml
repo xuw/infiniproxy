@@ -53,6 +53,11 @@ spec:
             secretKeyRef:
               name: infiniproxy-secrets
               key: admin-password
+        - name: SMTP_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: infiniproxy-secrets
+              key: smtp-password
         - name: MAX_INPUT_TOKENS
           value: "200000"
         - name: MAX_OUTPUT_TOKENS
