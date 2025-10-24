@@ -759,7 +759,8 @@ async def create_message(
         logger.info(f"Resolved backend: {backend.get('short_name', 'default')} | Model: {resolved_model}")
 
         # Store for fallback and usage tracking
-        fallback_model = resolved_model
+        # Fallback model should be the backend's default model, not the user-specified one
+        fallback_model = backend.get('default_model') or config.openai_model
 
         logger.debug(f"Translated to OpenAI request: {json.dumps(openai_request, indent=2)}")
 
@@ -769,6 +770,8 @@ async def create_message(
 
             async def stream_generator():
                 """Generator for streaming responses."""
+                nonlocal openai_request, fallback_model, client_specified_model, backend_client
+
                 try:
                     async for line in backend_client.create_streaming_completion(openai_request):
                         # Pass through OpenAI format stream
@@ -776,6 +779,44 @@ async def create_message(
                         yield f"{line}\n"
                 except Exception as e:
                     logger.error(f"Streaming error: {e}")
+
+                    # Check if this is a model error and we can retry with fallback
+                    is_model_error = False
+                    error_str = str(e).lower()
+
+                    # Check for model-related errors or generic 400 errors (likely model issues)
+                    if 'model' in error_str and ('not found' in error_str or 'does not exist' in error_str or 'invalid' in error_str):
+                        is_model_error = True
+                    elif '400' in error_str or 'bad request' in error_str:
+                        # 400 errors on streaming are often model-related
+                        is_model_error = True
+                    elif 'attempted to access streaming response content' in error_str:
+                        # This specific error occurs with 400 status from httpx
+                        is_model_error = True
+
+                    if hasattr(e, 'response') and e.response:
+                        try:
+                            response_text = e.response.text if hasattr(e.response, 'text') else str(e.response)
+                            response_lower = response_text.lower()
+                            if 'model' in response_lower and ('not found' in response_lower or 'does not exist' in response_lower or 'no access' in response_lower or 'invalid' in response_lower):
+                                is_model_error = True
+                        except:
+                            pass
+
+                    # Retry with fallback model if it's a model error
+                    if client_specified_model and is_model_error and openai_request.get('model') != fallback_model:
+                        logger.warning(f"⚠️  Client-specified model '{openai_request.get('model')}' failed in streaming, falling back to: {fallback_model}")
+                        openai_request['model'] = fallback_model
+                        try:
+                            async for line in backend_client.create_streaming_completion(openai_request):
+                                yield f"{line}\n"
+                            return
+                        except Exception as retry_error:
+                            logger.error(f"Fallback model also failed: {retry_error}")
+                            error_line = f'data: {json.dumps({"error": f"Both specified and fallback models failed: {str(retry_error)}"})}\n\n'
+                            yield error_line
+                            return
+
                     error_line = f'data: {json.dumps({"error": str(e)})}\n\n'
                     yield error_line
 
