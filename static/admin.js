@@ -8,6 +8,7 @@ let backends = [];
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
+    console.log('DOMContentLoaded - initializing admin panel');
     setupTabs();
     setupLogout();
     loadUsers();
@@ -17,9 +18,19 @@ document.addEventListener('DOMContentLoaded', () => {
     // Setup form handlers
     document.getElementById('create-user-form').addEventListener('submit', handleCreateUser);
     document.getElementById('create-key-form').addEventListener('submit', handleCreateKey);
-    document.getElementById('create-backend-form').addEventListener('submit', handleCreateBackend);
+
+    const backendForm = document.getElementById('create-backend-form');
+    if (backendForm) {
+        console.log('Backend form found, attaching event listener');
+        backendForm.addEventListener('submit', handleCreateBackend);
+    } else {
+        console.error('Backend form not found!');
+    }
+
     document.getElementById('filter-user').addEventListener('change', handleFilterKeys);
     document.getElementById('batch-create-btn').addEventListener('click', handleBatchCreate);
+
+    console.log('All event listeners attached');
 });
 
 // Fetch wrapper with authentication error handling
@@ -793,14 +804,17 @@ async function loadBackends() {
     const tbody = document.getElementById('backends-table-body');
 
     try {
+        console.log('Loading backends...');
         loading.style.display = 'block';
         list.style.display = 'none';
 
         const response = await fetch(`${API_BASE}/admin/backends?active_only=false`);
 
+        console.log('Backends response status:', response.status);
         if (!response.ok) throw new Error('Failed to load backends');
 
         backends = await response.json();
+        console.log('Loaded backends:', backends);
 
         if (backends.length === 0) {
             tbody.innerHTML = `
@@ -856,7 +870,11 @@ async function loadBackends() {
 
 // Create new backend
 async function handleCreateBackend(e) {
-    e.preventDefault();
+    console.log('handleCreateBackend called');
+    if (e) {
+        e.preventDefault();
+        console.log('Default prevented');
+    }
 
     const data = {
         short_name: document.getElementById('backend-short-name').value,
@@ -867,6 +885,8 @@ async function handleCreateBackend(e) {
         is_default: document.getElementById('backend-is-default').value === 'true'
     };
 
+    console.log('Creating backend with data:', data);
+
     try {
         const response = await fetchWithAuth(`${API_BASE}/admin/backends`, {
             method: 'POST',
@@ -874,12 +894,15 @@ async function handleCreateBackend(e) {
             body: JSON.stringify(data)
         });
 
+        console.log('Create backend response status:', response.status);
+
         if (!response.ok) {
             const error = await response.json();
             throw new Error(error.detail || 'Failed to create backend');
         }
 
         const result = await response.json();
+        console.log('Backend created successfully:', result);
         showAlert(result.message, 'success');
 
         // Reset form
