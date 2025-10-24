@@ -234,50 +234,89 @@ async def health():
 @app.get("/v1/models")
 async def list_models(user_info: Dict[str, Any] = Depends(get_current_user)):
     """
-    List available models from the backend.
+    List available models from all backend services.
 
-    This endpoint forwards the request to the backend's /v1/models endpoint.
-    Requires authentication via Bearer token.
+    This endpoint queries all active backends and aggregates their models,
+    grouped by backend. Requires authentication via Bearer token.
     """
     try:
-        # Extract base URL from backend_url (remove /chat/completions or /messages)
-        backend_url = config.openai_base_url
-        if '/chat/completions' in backend_url:
-            models_base_url = backend_url.replace('/chat/completions', '')
-        elif '/messages' in backend_url:
-            models_base_url = backend_url.replace('/messages', '')
-        else:
-            models_base_url = backend_url
+        # Get all active backends
+        backends = backend_manager.list_backends(active_only=True)
 
-        models_url = f"{models_base_url}/models"
+        if not backends:
+            logger.warning("No active backends found")
+            return {"object": "list", "data": [], "backends": []}
 
-        logger.info(f"Forwarding /v1/models request to backend: {models_url}")
+        all_models = []
+        backends_info = []
 
-        # Forward request to backend
-        response = requests.get(
-            models_url,
-            headers={
-                "Authorization": f"Bearer {config.openai_api_key}",
-                "Content-Type": "application/json"
-            },
-            timeout=10
-        )
+        for backend in backends:
+            try:
+                # Extract base URL (remove /chat/completions or /messages if present)
+                backend_url = backend['base_url']
+                if '/chat/completions' in backend_url:
+                    models_base_url = backend_url.replace('/chat/completions', '')
+                elif '/messages' in backend_url:
+                    models_base_url = backend_url.replace('/messages', '')
+                else:
+                    models_base_url = backend_url
 
-        if response.status_code == 200:
-            logger.info(f"Successfully retrieved models list from backend")
-            return response.json()
-        else:
-            logger.error(f"Backend returned error: {response.status_code} - {response.text}")
-            raise HTTPException(
-                status_code=response.status_code,
-                detail=f"Backend error: {response.text}"
-            )
+                models_url = f"{models_base_url}/models"
 
-    except requests.exceptions.Timeout:
-        logger.error("Timeout while fetching models from backend")
-        raise HTTPException(status_code=504, detail="Backend timeout")
+                logger.info(f"Querying models from backend '{backend['short_name']}': {models_url}")
+
+                # Query backend's models endpoint
+                response = requests.get(
+                    models_url,
+                    headers={
+                        "Authorization": f"Bearer {backend['api_key']}",
+                        "Content-Type": "application/json"
+                    },
+                    timeout=10
+                )
+
+                if response.status_code == 200:
+                    backend_models = response.json()
+                    models_list = backend_models.get('data', [])
+
+                    # Prefix model IDs with backend short_name
+                    prefixed_models = []
+                    for model in models_list:
+                        prefixed_model = model.copy()
+                        original_id = model.get('id', '')
+                        prefixed_model['id'] = f"{backend['short_name']}/{original_id}"
+                        prefixed_model['backend'] = backend['short_name']
+                        prefixed_model['backend_name'] = backend['name']
+                        prefixed_models.append(prefixed_model)
+
+                    all_models.extend(prefixed_models)
+
+                    backends_info.append({
+                        "short_name": backend['short_name'],
+                        "name": backend['name'],
+                        "models_count": len(models_list),
+                        "models": prefixed_models
+                    })
+
+                    logger.info(f"Retrieved {len(models_list)} models from backend '{backend['short_name']}'")
+                else:
+                    logger.error(f"Backend '{backend['short_name']}' returned error: {response.status_code}")
+
+            except requests.exceptions.Timeout:
+                logger.error(f"Timeout querying backend '{backend['short_name']}'")
+            except Exception as e:
+                logger.error(f"Error querying backend '{backend['short_name']}': {e}")
+
+        logger.info(f"Successfully aggregated {len(all_models)} models from {len(backends_info)} backends")
+
+        return {
+            "object": "list",
+            "data": all_models,
+            "backends": backends_info
+        }
+
     except Exception as e:
-        logger.error(f"Error fetching models: {e}")
+        logger.error(f"Error aggregating models from backends: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1279,7 +1318,8 @@ async def get_user_usage_by_backend_endpoint(user_id: int):
 
 @app.get("/admin/backends")
 async def list_backends_endpoint(
-    active_only: bool = False
+    active_only: bool = False,
+    user_info: Dict[str, Any] = Depends(get_current_user)
 ):
     """
     List all backend services.
@@ -1287,7 +1327,7 @@ async def list_backends_endpoint(
     Query params:
         active_only: If true, only return active backends
 
-    Note: Public endpoint - no authentication required
+    Note: Requires valid user API key for authentication
     """
     backends = backend_manager.list_backends(active_only=active_only)
     return backends
@@ -1416,14 +1456,15 @@ async def delete_backend_endpoint(
 
 @app.get("/admin/backends/{backend_id}/models")
 async def list_backend_models_endpoint(
-    backend_id: int
+    backend_id: int,
+    user_info: Dict[str, Any] = Depends(get_current_user)
 ):
     """
     List available models from a specific backend service.
 
     This makes a request to the backend's /v1/models endpoint.
 
-    Note: Public endpoint - no authentication required
+    Note: Requires valid user API key for authentication
     """
     backend = backend_manager.get_backend(backend_id)
 
