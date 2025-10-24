@@ -12,8 +12,8 @@ from typing import Dict, Optional
 
 # Configuration
 BASE_URL = "https://aiapi.iiis.co:9443"
-ADMIN_USERNAME = "admin"
-ADMIN_PASSWORD = "changeme"  # Default from deployment
+ADMIN_USERNAME = "xuw"
+ADMIN_PASSWORD = "wsxST613"  # From deployment
 
 # Disable SSL warnings for self-signed certs (if any)
 import urllib3
