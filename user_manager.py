@@ -570,3 +570,55 @@ class UserManager:
             logger.info(f"Set model for API key {api_key_id} to {model_name}")
         finally:
             conn.close()
+
+    def delete_user(self, user_id: int):
+        """
+        Delete a user and all associated API keys and usage records.
+
+        Args:
+            user_id: User ID to delete
+
+        Note:
+            This is a destructive operation that cascades to:
+            - All API keys for this user
+            - All usage records for those API keys
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        try:
+            # Get all API keys for this user
+            cursor.execute("SELECT id FROM api_keys WHERE user_id = ?", (user_id,))
+            api_key_ids = [row[0] for row in cursor.fetchall()]
+
+            # Delete usage records for all API keys
+            if api_key_ids:
+                placeholders = ','.join('?' * len(api_key_ids))
+                cursor.execute(
+                    f"DELETE FROM usage_records WHERE api_key_id IN ({placeholders})",
+                    api_key_ids
+                )
+                usage_count = cursor.rowcount
+                logger.info(f"Deleted {usage_count} usage records for user {user_id}")
+
+            # Delete all API keys for this user
+            cursor.execute("DELETE FROM api_keys WHERE user_id = ?", (user_id,))
+            keys_count = cursor.rowcount
+            logger.info(f"Deleted {keys_count} API keys for user {user_id}")
+
+            # Delete the user
+            cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
+            if cursor.rowcount == 0:
+                raise ValueError(f"User {user_id} not found")
+
+            conn.commit()
+            logger.info(f"Successfully deleted user {user_id}")
+
+        except ValueError:
+            raise
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Failed to delete user {user_id}: {e}")
+            raise
+        finally:
+            conn.close()

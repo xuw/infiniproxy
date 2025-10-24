@@ -152,6 +152,14 @@ function displayUsers(usersList) {
                     <button class="btn btn-primary btn-sm" onclick="viewUserKeys(${user.id})">
                         View Keys
                     </button>
+                    ${user.email ? `
+                        <button class="btn btn-primary btn-sm" onclick="generateAndSendKey(${user.id}, '${user.username}', '${user.email}')" title="Generate new API key and send via email">
+                            📧 Send Key
+                        </button>
+                    ` : ''}
+                    <button class="btn btn-danger btn-sm" onclick="deleteUser(${user.id}, '${user.username}')">
+                        Delete
+                    </button>
                 </div>
             </td>
         </tr>
@@ -468,6 +476,70 @@ async function deactivateKey(keyId) {
     } catch (error) {
         console.error('Error deactivating API key:', error);
         showAlert('Failed to deactivate API key', 'error');
+    }
+}
+
+async function deleteUser(userId, username) {
+    if (!confirm(`Are you sure you want to delete user "${username}"?\n\nThis will permanently delete:\n- The user account\n- All API keys for this user\n- All usage records\n\nThis action CANNOT be undone!`)) {
+        return;
+    }
+
+    try {
+        const response = await fetchWithAuth(`${API_BASE}/admin/users/${userId}`, {
+            method: 'DELETE'
+        });
+
+        if (response.ok) {
+            showAlert(`User "${username}" deleted successfully`, 'success');
+            await loadUsers();
+            await loadAPIKeys(); // Refresh keys list too
+        } else {
+            const data = await response.json();
+            showAlert(data.detail || 'Failed to delete user', 'error');
+        }
+    } catch (error) {
+        console.error('Error deleting user:', error);
+        showAlert('Failed to delete user', 'error');
+    }
+}
+
+async function generateAndSendKey(userId, username, email) {
+    if (!confirm(`Generate a new API key for "${username}" and send it to ${email}?`)) {
+        return;
+    }
+
+    try {
+        const response = await fetchWithAuth(
+            `${API_BASE}/admin/users/${userId}/generate-and-send-key`,
+            { method: 'POST' }
+        );
+
+        const data = await response.json();
+
+        if (response.ok) {
+            const alertDiv = document.getElementById('alert');
+            alertDiv.className = 'alert alert-warning show';
+
+            const emailStatus = data.email_sent
+                ? `✅ Email sent successfully to ${email}`
+                : `⚠️ Email sending failed`;
+
+            alertDiv.innerHTML = `
+                <strong>✅ New API key generated for "${username}"!</strong><br><br>
+                ${emailStatus}<br><br>
+                <strong>⚠️ SAVE THIS API KEY - IT WILL NOT BE SHOWN AGAIN!</strong><br><br>
+                <div class="code-block">${data.api_key}</div>
+                <br>
+                <small>Copy this key now and store it securely.</small>
+            `;
+
+            await loadAPIKeys(); // Refresh keys list
+        } else {
+            showAlert(data.detail || 'Failed to generate and send API key', 'error');
+        }
+    } catch (error) {
+        console.error('Error generating and sending API key:', error);
+        showAlert('Failed to generate and send API key', 'error');
     }
 }
 

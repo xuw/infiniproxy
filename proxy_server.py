@@ -987,6 +987,67 @@ async def send_api_key_email_endpoint(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/admin/users/{user_id}/generate-and-send-key")
+async def generate_and_send_key_endpoint(
+    user_id: int,
+    session: str = Depends(verify_admin_session)
+):
+    """
+    Generate a new API key for a user and automatically send it via email.
+
+    Admin endpoint - requires authentication.
+
+    Parameters:
+    - user_id: The user's ID
+
+    Returns the new API key (shown only once) and email status.
+    """
+    try:
+        # Get user info
+        users = user_manager.list_users()
+        user = next((u for u in users if u['id'] == user_id), None)
+
+        if not user:
+            raise HTTPException(status_code=404, detail=f"User {user_id} not found")
+
+        if not user.get('email'):
+            raise HTTPException(
+                status_code=400,
+                detail=f"User {user['username']} has no email address"
+            )
+
+        # Generate new API key
+        api_key = user_manager.create_api_key(user_id, name="Admin Generated Key")
+
+        # Send email
+        email_sent = False
+        if email_sender:
+            email_sent = email_sender.send_api_key_email(
+                user['username'],
+                user['email'],
+                api_key
+            )
+            if email_sent:
+                logger.info(f"✅ Generated and sent API key to {user['email']}")
+            else:
+                logger.warning(f"⚠️ Generated key but failed to send email to {user['email']}")
+
+        return {
+            "success": True,
+            "api_key": api_key,
+            "email_sent": email_sent,
+            "email": user['email'],
+            "username": user['username'],
+            "message": f"New API key generated and {'sent to' if email_sent else 'could not be sent to'} {user['email']}"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating and sending API key for user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/admin/users")
 async def list_users_endpoint(session: str = Depends(verify_admin_session)):
     """
@@ -1030,6 +1091,35 @@ async def deactivate_api_key_endpoint(
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/admin/users/{user_id}")
+async def delete_user_endpoint(
+    user_id: int,
+    session: str = Depends(verify_admin_session)
+):
+    """
+    Delete a user and all associated API keys and usage records.
+
+    Admin endpoint - requires authentication.
+
+    WARNING: This is a destructive operation that cannot be undone.
+    Deletes:
+    - The user account
+    - All API keys for this user
+    - All usage records for those API keys
+    """
+    try:
+        user_manager.delete_user(user_id)
+        return {
+            "success": True,
+            "message": f"User {user_id} and all associated data deleted successfully"
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error deleting user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete user: {str(e)}")
 
 
 @app.get("/usage/me")
