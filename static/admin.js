@@ -4,6 +4,7 @@ const API_BASE = window.location.origin;
 // State
 let users = [];
 let apiKeys = [];
+let backends = [];
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -11,10 +12,12 @@ document.addEventListener('DOMContentLoaded', () => {
     setupLogout();
     loadUsers();
     loadAPIKeys();
+    loadBackends();
 
     // Setup form handlers
     document.getElementById('create-user-form').addEventListener('submit', handleCreateUser);
     document.getElementById('create-key-form').addEventListener('submit', handleCreateKey);
+    document.getElementById('create-backend-form').addEventListener('submit', handleCreateBackend);
     document.getElementById('filter-user').addEventListener('change', handleFilterKeys);
     document.getElementById('batch-create-btn').addEventListener('click', handleBatchCreate);
 });
@@ -779,4 +782,194 @@ function formatDate(dateString) {
 function formatNumber(num) {
     if (num === undefined || num === null) return '0';
     return num.toLocaleString('en-US');
+}
+
+// ===== Backend Management Functions =====
+
+// Load all backends
+async function loadBackends() {
+    const loading = document.getElementById('backends-loading');
+    const list = document.getElementById('backends-list');
+    const tbody = document.getElementById('backends-table-body');
+
+    try {
+        loading.style.display = 'block';
+        list.style.display = 'none';
+
+        const response = await fetch(`${API_BASE}/admin/backends?active_only=false`);
+
+        if (!response.ok) throw new Error('Failed to load backends');
+
+        backends = await response.json();
+
+        if (backends.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="9" class="empty-state">
+                        <div class="empty-state-icon">🔧</div>
+                        <div>No backend services configured yet.</div>
+                    </td>
+                </tr>
+            `;
+        } else {
+            tbody.innerHTML = backends.map(backend => `
+                <tr>
+                    <td>${backend.id}</td>
+                    <td><code class="key-display">${backend.short_name}</code></td>
+                    <td>${backend.name}</td>
+                    <td><code class="key-display" style="font-size: 10px; max-width: 300px; overflow: hidden; text-overflow: ellipsis; display: block;">${backend.base_url}</code></td>
+                    <td><code class="key-display">...${backend.api_key_masked}</code></td>
+                    <td>${backend.default_model || '-'}</td>
+                    <td>
+                        <span class="badge ${backend.is_active ? 'badge-success' : 'badge-danger'}">
+                            ${backend.is_active ? 'Active' : 'Inactive'}
+                        </span>
+                    </td>
+                    <td>
+                        ${backend.is_default ? '<span class="badge badge-success">Yes</span>' : '-'}
+                    </td>
+                    <td class="actions">
+                        <button class="btn btn-sm btn-primary" onclick="handleToggleBackendStatus(${backend.id}, ${!backend.is_active})">
+                            ${backend.is_active ? 'Deactivate' : 'Activate'}
+                        </button>
+                        ${!backend.is_default ? `
+                            <button class="btn btn-sm btn-primary" onclick="handleSetDefaultBackend(${backend.id})">
+                                Set Default
+                            </button>
+                        ` : ''}
+                        <button class="btn btn-sm btn-danger" onclick="handleDeleteBackend(${backend.id})">
+                            Delete
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        loading.style.display = 'none';
+        list.style.display = 'block';
+    } catch (error) {
+        console.error('Error loading backends:', error);
+        showAlert('Failed to load backends: ' + error.message, 'error');
+        loading.style.display = 'none';
+    }
+}
+
+// Create new backend
+async function handleCreateBackend(e) {
+    e.preventDefault();
+
+    const data = {
+        short_name: document.getElementById('backend-short-name').value,
+        name: document.getElementById('backend-name').value,
+        base_url: document.getElementById('backend-base-url').value,
+        api_key: document.getElementById('backend-api-key').value,
+        default_model: document.getElementById('backend-default-model').value || null,
+        is_default: document.getElementById('backend-is-default').value === 'true'
+    };
+
+    try {
+        const response = await fetchWithAuth(`${API_BASE}/admin/backends`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to create backend');
+        }
+
+        const result = await response.json();
+        showAlert(result.message, 'success');
+
+        // Reset form
+        document.getElementById('create-backend-form').reset();
+
+        // Reload backends
+        await loadBackends();
+    } catch (error) {
+        console.error('Error creating backend:', error);
+        showAlert('Failed to create backend: ' + error.message, 'error');
+    }
+}
+
+// Toggle backend active status
+async function handleToggleBackendStatus(backendId, newStatus) {
+    try {
+        const response = await fetchWithAuth(`${API_BASE}/admin/backends/${backendId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ is_active: newStatus })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to update backend');
+        }
+
+        const result = await response.json();
+        showAlert(result.message, 'success');
+
+        // Reload backends
+        await loadBackends();
+    } catch (error) {
+        console.error('Error toggling backend status:', error);
+        showAlert('Failed to toggle backend status: ' + error.message, 'error');
+    }
+}
+
+// Set backend as default
+async function handleSetDefaultBackend(backendId) {
+    if (!confirm('Set this backend as the default? This will unset any other default backend.')) {
+        return;
+    }
+
+    try {
+        const response = await fetchWithAuth(`${API_BASE}/admin/backends/${backendId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ is_default: true })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to set default backend');
+        }
+
+        const result = await response.json();
+        showAlert(result.message, 'success');
+
+        // Reload backends
+        await loadBackends();
+    } catch (error) {
+        console.error('Error setting default backend:', error);
+        showAlert('Failed to set default backend: ' + error.message, 'error');
+    }
+}
+
+// Delete backend
+async function handleDeleteBackend(backendId) {
+    if (!confirm('Are you sure you want to delete this backend? This will fail if any API keys are using it.')) {
+        return;
+    }
+
+    try {
+        const response = await fetchWithAuth(`${API_BASE}/admin/backends/${backendId}`, {
+            method: 'DELETE'
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to delete backend');
+        }
+
+        const result = await response.json();
+        showAlert(result.message, 'success');
+
+        // Reload backends
+        await loadBackends();
+    } catch (error) {
+        console.error('Error deleting backend:', error);
+        showAlert('Failed to delete backend: ' + error.message, 'error');
+    }
 }

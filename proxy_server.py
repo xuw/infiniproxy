@@ -1279,14 +1279,15 @@ async def get_user_usage_by_backend_endpoint(user_id: int):
 
 @app.get("/admin/backends")
 async def list_backends_endpoint(
-    active_only: bool = False,
-    session: str = Depends(verify_admin_session)
+    active_only: bool = False
 ):
     """
     List all backend services.
 
     Query params:
         active_only: If true, only return active backends
+
+    Note: Public endpoint - no authentication required
     """
     backends = backend_manager.list_backends(active_only=active_only)
     return backends
@@ -1415,13 +1416,14 @@ async def delete_backend_endpoint(
 
 @app.get("/admin/backends/{backend_id}/models")
 async def list_backend_models_endpoint(
-    backend_id: int,
-    session: str = Depends(verify_admin_session)
+    backend_id: int
 ):
     """
     List available models from a specific backend service.
 
     This makes a request to the backend's /v1/models endpoint.
+
+    Note: Public endpoint - no authentication required
     """
     backend = backend_manager.get_backend(backend_id)
 
