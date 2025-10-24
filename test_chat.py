@@ -112,6 +112,10 @@ def send_claude_format(base_url, api_key, message, model, max_tokens, stream, fi
             print("📥 Response (streaming):")
             print("-" * 80)
 
+            has_reasoning = False
+            reasoning_started = False
+            content_started = False
+
             for line in response.iter_lines():
                 if line:
                     line = line.decode('utf-8')
@@ -130,8 +134,25 @@ def send_claude_format(base_url, api_key, message, model, max_tokens, stream, fi
                             elif 'choices' in data and len(data['choices']) > 0:
                                 # OpenAI format (proxy may pass through OpenAI format)
                                 delta = data['choices'][0].get('delta', {})
-                                content = delta.get('content') or delta.get('reasoning_content', '')
+
+                                # Check for reasoning content
+                                reasoning = delta.get('reasoning_content', '')
+                                if reasoning:
+                                    if not reasoning_started:
+                                        print("🤔 Thinking:")
+                                        print("-" * 80)
+                                        reasoning_started = True
+                                        has_reasoning = True
+                                    print(reasoning, end='', flush=True)
+
+                                # Check for regular content
+                                content = delta.get('content', '')
                                 if content:
+                                    if has_reasoning and not content_started:
+                                        print("\n" + "-" * 80)
+                                        print("\n💬 Response:")
+                                        print("-" * 80)
+                                        content_started = True
                                     print(content, end='', flush=True)
                         except json.JSONDecodeError:
                             pass
@@ -233,6 +254,10 @@ def send_openai_format(base_url, api_key, message, model, max_tokens, stream, fi
             print("📥 Response (streaming):")
             print("-" * 80)
 
+            has_reasoning = False
+            reasoning_started = False
+            content_started = False
+
             for line in response.iter_lines():
                 if line:
                     line = line.decode('utf-8')
@@ -244,9 +269,25 @@ def send_openai_format(base_url, api_key, message, model, max_tokens, stream, fi
                             data = json.loads(data_str)
                             if 'choices' in data and len(data['choices']) > 0:
                                 delta = data['choices'][0].get('delta', {})
-                                # Handle both content and reasoning_content fields
-                                content = delta.get('content') or delta.get('reasoning_content', '')
+
+                                # Check for reasoning content
+                                reasoning = delta.get('reasoning_content', '')
+                                if reasoning:
+                                    if not reasoning_started:
+                                        print("🤔 Thinking:")
+                                        print("-" * 80)
+                                        reasoning_started = True
+                                        has_reasoning = True
+                                    print(reasoning, end='', flush=True)
+
+                                # Check for regular content
+                                content = delta.get('content', '')
                                 if content:
+                                    if has_reasoning and not content_started:
+                                        print("\n" + "-" * 80)
+                                        print("\n💬 Response:")
+                                        print("-" * 80)
+                                        content_started = True
                                     print(content, end='', flush=True)
                         except json.JSONDecodeError:
                             pass
@@ -268,7 +309,20 @@ def send_openai_format(base_url, api_key, message, model, max_tokens, stream, fi
 
             if 'choices' in data and len(data['choices']) > 0:
                 choice = data['choices'][0]
-                message_content = choice.get('message', {}).get('content', '')
+                message = choice.get('message', {})
+                reasoning_content = message.get('reasoning_content', '')
+                message_content = message.get('content', '')
+
+                # Show reasoning/thinking first if available
+                if reasoning_content:
+                    print("🤔 Thinking:")
+                    print("-" * 80)
+                    print(reasoning_content)
+                    print("-" * 80)
+                    print()
+                    print("💬 Response:")
+                    print("-" * 80)
+
                 print(message_content)
             else:
                 print(json.dumps(data, indent=2))
@@ -356,7 +410,15 @@ Examples:
     parser.add_argument(
         '--stream',
         action='store_true',
-        help='Enable streaming response'
+        default=True,
+        help='Enable streaming response (default: enabled, use --no-stream to disable)'
+    )
+
+    parser.add_argument(
+        '--no-stream',
+        action='store_false',
+        dest='stream',
+        help='Disable streaming response'
     )
 
     parser.add_argument(
