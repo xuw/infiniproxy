@@ -19,7 +19,9 @@
       "Bash(git push:*)",
       "Bash(kubectl apply:*)",
       "Bash(git reset:*)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(python test_admin_features.py:*)",
+      "Bash(timeout 30 python:*)"
     ],
     "deny": [],
     "ask": []
