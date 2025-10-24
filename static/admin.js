@@ -175,11 +175,22 @@ async function handleCreateUser(e) {
             // Show the API key in a prominent alert (only time it's shown!)
             const alertDiv = document.getElementById('alert');
             alertDiv.className = 'alert alert-warning show';
+
+            const emailStatus = data.email_sent
+                ? '✅ Email sent successfully to ' + email
+                : (email ? '⚠️ Email sending failed or no email provided' : '');
+
+            const sendEmailButton = email
+                ? `<button class="btn btn-primary btn-sm" onclick="sendAPIKeyEmail(${data.user_id}, '${data.api_key}', '${email}')">📧 Send Email</button>`
+                : '';
+
             alertDiv.innerHTML = `
                 <strong>✅ User "${username}" created successfully!</strong><br><br>
+                ${emailStatus ? emailStatus + '<br><br>' : ''}
                 <strong>⚠️ SAVE THIS API KEY - IT WILL NOT BE SHOWN AGAIN!</strong><br><br>
                 <div class="code-block">${data.api_key}</div>
                 <br>
+                ${sendEmailButton}
                 <small>A default API key has been automatically generated for this user. Copy it now and store it securely.</small>
             `;
 
@@ -379,24 +390,61 @@ async function handleCreateKey(e) {
         const data = await response.json();
 
         if (response.ok) {
+            // Get user email for send button
+            const user = users.find(u => u.id === parseInt(userId));
+            const userEmail = user ? user.email : null;
+
             // Show the API key in an alert (only time it's shown!)
             const alertDiv = document.getElementById('alert');
             alertDiv.className = 'alert alert-warning show';
+
+            const emailStatus = data.email_sent
+                ? '✅ Email sent successfully to ' + userEmail
+                : (userEmail ? '⚠️ Email sending failed or no email provided' : '');
+
+            const sendEmailButton = userEmail
+                ? `<button class="btn btn-primary btn-sm" onclick="sendAPIKeyEmail(${userId}, '${data.api_key}', '${userEmail}')">📧 Send Email</button>`
+                : '';
+
             alertDiv.innerHTML = `
+                <strong>✅ API Key created successfully!</strong><br><br>
+                ${emailStatus ? emailStatus + '<br><br>' : ''}
                 <strong>⚠️ SAVE THIS API KEY - IT WILL NOT BE SHOWN AGAIN!</strong><br><br>
                 <div class="code-block">${data.api_key}</div>
                 <br>
+                ${sendEmailButton}
                 <small>Copy this key now and store it securely.</small>
             `;
 
             document.getElementById('create-key-form').reset();
             await loadAPIKeys();
-        } else {
+        } else{
             showAlert(data.detail || 'Failed to create API key', 'error');
         }
     } catch (error) {
         console.error('Error creating API key:', error);
         showAlert('Failed to create API key', 'error');
+    }
+}
+
+async function sendAPIKeyEmail(userId, apiKey, email) {
+    try {
+        const response = await fetchWithAuth(
+            `${API_BASE}/admin/send-api-key-email?user_id=${userId}&api_key=${encodeURIComponent(apiKey)}` +
+            (email ? `&email=${encodeURIComponent(email)}` : ''),
+            { method: 'POST' }
+        );
+
+        const data = await response.json();
+
+        if (response.ok) {
+            showAlert(`✅ API key email sent successfully to ${data.email}`, 'success');
+        } else {
+            showAlert(data.detail || 'Failed to send email', 'error');
+        }
+    } catch (error) {
+        console.error('Error sending API key email:', error);
+        showAlert('Failed to send email', 'error');
     }
 }
 

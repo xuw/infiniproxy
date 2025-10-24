@@ -18,6 +18,7 @@ from config import ProxyConfig
 from translator import APITranslator
 from openai_client import OpenAIClient
 from user_manager import UserManager
+from email_sender import EmailSender
 import admin_auth
 
 # Configure logging
@@ -46,6 +47,7 @@ config: ProxyConfig = None
 translator: APITranslator = None
 openai_client: OpenAIClient = None
 user_manager: UserManager = None
+email_sender: EmailSender = None
 
 # Security
 security = HTTPBearer(auto_error=False)
@@ -110,7 +112,7 @@ async def verify_admin_session(admin_session: Optional[str] = Cookie(None)):
 @app.on_event("startup")
 async def startup_event():
     """Initialize the proxy on startup."""
-    global config, translator, openai_client, user_manager
+    global config, translator, openai_client, user_manager, email_sender
 
     logger.info("Starting OpenAI to Claude API Proxy...")
 
@@ -144,6 +146,10 @@ async def startup_event():
     db_path = os.path.join(db_dir, "proxy_users.db")
     user_manager = UserManager(db_path=db_path)
     logger.info(f"User manager initialized with database at {db_path}")
+
+    # Initialize email sender for API key notifications
+    email_sender = EmailSender()
+    logger.info("Email sender initialized for API key notifications")
 
     # Initialize admin authentication with same database
     admin_auth.init_admin_auth(db_path=db_path)
@@ -739,11 +745,21 @@ async def create_user(
         # Automatically create a default API key
         api_key = user_manager.create_api_key(user_id, name="Default Key")
 
+        # Send email with API key if email address is provided
+        email_sent = False
+        if email and email_sender:
+            email_sent = email_sender.send_api_key_email(username, email, api_key)
+            if email_sent:
+                logger.info(f"✅ API key email sent to {email}")
+            else:
+                logger.warning(f"⚠️ Failed to send API key email to {email}")
+
         return {
             "success": True,
             "user_id": user_id,
             "username": username,
             "api_key": api_key,
+            "email_sent": email_sent,
             "message": f"User {username} created successfully",
             "warning": "Save this API key! It will not be shown again."
         }
@@ -807,10 +823,18 @@ async def create_users_batch(
                 user_id = user_manager.create_user(username, email if email else None)
                 api_key = user_manager.create_api_key(user_id, name="Default Key")
 
+                # Send email with API key if email address is provided
+                email_sent = False
+                if email and email_sender:
+                    email_sent = email_sender.send_api_key_email(username, email, api_key)
+                    if email_sent:
+                        logger.info(f"✅ API key email sent to {email} for user {username}")
+
                 results.append({
                     "username": username,
                     "email": email,
-                    "api_key": api_key
+                    "api_key": api_key,
+                    "email_sent": email_sent
                 })
                 logger.info(f"Batch created user: {username}")
 
@@ -864,15 +888,103 @@ async def create_api_key_endpoint(
     """
     try:
         api_key = user_manager.create_api_key(user_id, name)
+
+        # Get user info to send email
+        users = user_manager.list_users()
+        user = next((u for u in users if u['id'] == user_id), None)
+
+        # Send email with API key if user has email
+        email_sent = False
+        if user and user.get('email') and email_sender:
+            email_sent = email_sender.send_api_key_email(
+                user['username'],
+                user['email'],
+                api_key
+            )
+            if email_sent:
+                logger.info(f"✅ API key email sent to {user['email']}")
+            else:
+                logger.warning(f"⚠️ Failed to send API key email to {user['email']}")
+
         return {
             "success": True,
             "api_key": api_key,
             "user_id": user_id,
             "name": name,
+            "email_sent": email_sent,
             "warning": "Save this API key! It will not be shown again."
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/admin/send-api-key-email")
+async def send_api_key_email_endpoint(
+    user_id: int,
+    api_key: str,
+    email: Optional[str] = None,
+    session: str = Depends(verify_admin_session)
+):
+    """
+    Manually send an API key to a user's email.
+
+    Admin endpoint - requires authentication.
+
+    Parameters:
+    - user_id: The user's ID
+    - api_key: The plain text API key to send
+    - email: Optional email override (if not provided, uses user's registered email)
+
+    This is useful for:
+    - Resending emails when automatic sending failed
+    - Sending to a different email address
+    """
+    try:
+        # Get user info
+        users = user_manager.list_users()
+        user = next((u for u in users if u['id'] == user_id), None)
+
+        if not user:
+            raise HTTPException(status_code=404, detail=f"User {user_id} not found")
+
+        # Use provided email or user's registered email
+        target_email = email if email else user.get('email')
+
+        if not target_email:
+            raise HTTPException(
+                status_code=400,
+                detail="No email address provided and user has no registered email"
+            )
+
+        # Send email
+        if not email_sender:
+            raise HTTPException(status_code=500, detail="Email service not available")
+
+        email_sent = email_sender.send_api_key_email(
+            user['username'],
+            target_email,
+            api_key
+        )
+
+        if email_sent:
+            logger.info(f"✅ Manually sent API key email to {target_email}")
+            return {
+                "success": True,
+                "message": f"API key email sent to {target_email}",
+                "email": target_email
+            }
+        else:
+            logger.error(f"❌ Failed to send API key email to {target_email}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to send email to {target_email}"
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error sending API key email: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/admin/users")
