@@ -356,6 +356,87 @@ async def admin_logout(admin_session: Optional[str] = Cookie(None)):
     return response
 
 
+# ===== Backend Routing Helper =====
+
+def resolve_backend_and_model(
+    model_name: Optional[str],
+    user_info: Dict[str, Any]
+) -> tuple[Dict[str, Any], str, OpenAIClient]:
+    """
+    Determine which backend to use and the actual model name.
+
+    Backend selection priority:
+    1. If model has "backend/model" format → use specified backend
+    2. If user API key has backend_id set → use that backend
+    3. Otherwise → use default backend
+
+    Args:
+        model_name: Model name from request (may be None or "backend/model" format)
+        user_info: User information from authentication
+
+    Returns:
+        Tuple of (backend_dict, resolved_model_name, openai_client)
+    """
+    backend = None
+    resolved_model = model_name
+
+    # Parse model name for "backend/model" format
+    if model_name and '/' in model_name:
+        parts = model_name.split('/', 1)
+        backend_short_name = parts[0]
+        resolved_model = parts[1] if len(parts) > 1 else None
+
+        # Look up backend by short name
+        backend = backend_manager.get_backend_by_short_name(backend_short_name)
+        if not backend:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Backend '{backend_short_name}' not found or inactive"
+            )
+
+        logger.info(f"Using backend from model name: {backend_short_name} → {backend['name']}")
+
+    # Check if user has a preferred backend configured
+    elif user_info.get('api_key_id'):
+        user_backend = backend_manager.get_user_backend(user_info['api_key_id'])
+        if user_backend:
+            backend = user_backend
+            logger.info(f"Using user's preferred backend: {backend['short_name']} → {backend['name']}")
+
+    # Fall back to default backend
+    if not backend:
+        backend = backend_manager.get_default_backend()
+        if not backend:
+            # If no backend configured, use the original global config
+            logger.info("No backend services configured, using global config")
+            return {
+                'base_url': config.openai_base_url,
+                'api_key': config.openai_api_key,
+                'short_name': 'default',
+                'default_model': config.openai_model
+            }, resolved_model or config.openai_model, openai_client
+
+        logger.info(f"Using default backend: {backend['short_name']} → {backend['name']}")
+
+    # Use backend's default model if no model specified
+    if not resolved_model:
+        resolved_model = backend.get('default_model') or config.openai_model
+
+    # Create OpenAIClient for this backend (or reuse global if same)
+    if backend['base_url'] == config.openai_base_url and backend['api_key'] == config.openai_api_key:
+        # Same as global config, reuse existing client
+        client = openai_client
+    else:
+        # Different backend, create new client
+        client = OpenAIClient(
+            backend['base_url'],
+            backend['api_key'],
+            config.timeout
+        )
+
+    return backend, resolved_model, client
+
+
 @app.post("/v1/chat/completions")
 async def chat_completions(
     request: Request,
@@ -401,18 +482,18 @@ async def chat_completions(
 
         logger.debug(f"Full OpenAI request: {json.dumps(openai_request, indent=2)}")
 
-        # Determine fallback model (per-key or global default)
-        fallback_model = user_info.get('model_name') or config.openai_model
-        client_specified_model = original_had_model
+        # Resolve backend and model
+        # Priority: 1) Explicit model from request 2) Per-key model setting
+        requested_model = openai_request.get('model') if original_had_model else user_info.get('model_name')
+        backend, resolved_model, backend_client = resolve_backend_and_model(requested_model, user_info)
 
-        # Use per-key model if set and model not explicitly provided in request
-        if user_info.get('model_name') and not original_had_model:
-            openai_request['model'] = user_info['model_name']
-            logger.info(f"Using per-key model: {user_info['model_name']}")
-        elif not original_had_model:
-            # No client model and no per-key model, use global default
-            openai_request['model'] = config.openai_model
-            logger.info(f"Using global default model: {config.openai_model}")
+        # Update request with resolved model
+        openai_request['model'] = resolved_model
+        logger.info(f"Resolved backend: {backend.get('short_name', 'default')} | Model: {resolved_model}")
+
+        # Store for fallback and usage tracking
+        fallback_model = resolved_model
+        client_specified_model = original_had_model
 
         # Handle streaming vs non-streaming
         if is_streaming:
@@ -421,7 +502,7 @@ async def chat_completions(
             async def stream_generator():
                 """Generator for streaming responses."""
                 try:
-                    async for line in openai_client.create_streaming_completion(openai_request):
+                    async for line in backend_client.create_streaming_completion(openai_request):
                         yield f"{line}\n"
                 except Exception as e:
                     logger.error(f"Streaming error: {e}")
@@ -438,9 +519,9 @@ async def chat_completions(
             )
 
         # Non-streaming path
-        logger.info("🔄 Passing through to OpenAI backend...")
+        logger.info(f"🔄 Passing through to backend: {backend.get('name', 'default')}...")
         try:
-            openai_response = await openai_client.create_completion(openai_request)
+            openai_response = await backend_client.create_completion(openai_request)
             request_id = openai_response.get("id")
         except Exception as e:
             # Check if this is a model not found error and client specified a model
@@ -463,7 +544,7 @@ async def chat_completions(
             if client_specified_model and is_model_error:
                 logger.warning(f"⚠️  Client-specified model '{openai_request.get('model')}' not found, falling back to: {fallback_model}")
                 openai_request['model'] = fallback_model
-                openai_response = await openai_client.create_completion(openai_request)
+                openai_response = await backend_client.create_completion(openai_request)
                 request_id = openai_response.get("id")
             else:
                 raise
@@ -501,7 +582,7 @@ async def chat_completions(
             output_tokens=completion_tokens,
             model=backend_model,
             request_id=request_id,
-            backend_url=config.openai_base_url
+            backend_url=backend.get('base_url', config.openai_base_url)
         )
         logger.info(f"✅ Usage tracked for user {user_info['username']}")
 
