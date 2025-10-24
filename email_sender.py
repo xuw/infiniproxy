@@ -5,6 +5,7 @@ import logging
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.header import Header
+from email.utils import formataddr
 from typing import Optional
 import os
 
@@ -38,8 +39,9 @@ class EmailSender:
             MIMEMultipart email message
         """
         msg = MIMEMultipart('alternative')
-        msg['From'] = Header(f"InfiniProxy 系统 <{self.smtp_user}>", 'utf-8')
-        msg['To'] = Header(email, 'utf-8')
+        # Use formataddr for proper RFC5322 compliance with non-ASCII display names
+        msg['From'] = formataddr(("InfiniProxy 系统", self.smtp_user))
+        msg['To'] = email  # Plain email address, no encoding needed
         msg['Subject'] = Header('您的 InfiniProxy API 密钥', 'utf-8')
 
         # Plain text version
