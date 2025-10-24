@@ -320,6 +320,83 @@
             display: flex;
             gap: 8px;
         }
+
+        /* Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal.show {
+            display: flex;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 16px;
+            padding: 32px;
+            max-width: 600px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+        }
+
+        .modal-title {
+            font-size: 24px;
+            font-weight: 600;
+            color: #2d3748;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 28px;
+            color: #a0aec0;
+            cursor: pointer;
+            padding: 0;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: color 0.3s;
+        }
+
+        .modal-close:hover {
+            color: #2d3748;
+        }
+
+        .modal-footer {
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+            margin-top: 24px;
+        }
+
+        .btn-secondary {
+            background: #e2e8f0;
+            color: #2d3748;
+        }
+
+        .btn-secondary:hover {
+            background: #cbd5e0;
+        }
     </style>
 </head>
 <body>
@@ -694,6 +771,54 @@
                     </div>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- Edit Backend Modal -->
+    <div id="edit-backend-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">Edit Backend Service</h2>
+                <button class="modal-close" onclick="closeEditBackendModal()">&times;</button>
+            </div>
+            <form id="edit-backend-form">
+                <input type="hidden" id="edit-backend-id">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="edit-backend-short-name">Short Name * <small>(e.g., zhipu, inf, sf)</small></label>
+                        <input type="text" id="edit-backend-short-name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-backend-name">Display Name *</label>
+                        <input type="text" id="edit-backend-name" required>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="edit-backend-base-url">Base URL * <small>(Full endpoint including /chat/completions)</small></label>
+                    <input type="text" id="edit-backend-base-url" required>
+                </div>
+                <div class="form-group">
+                    <label for="edit-backend-api-key">API Key *</label>
+                    <input type="text" id="edit-backend-api-key" required>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="edit-backend-default-model">Default Model <small>(optional)</small></label>
+                        <input type="text" id="edit-backend-default-model">
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-backend-is-default">Set as Default Backend</label>
+                        <select id="edit-backend-is-default">
+                            <option value="false">No</option>
+                            <option value="true">Yes</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeEditBackendModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Changes</button>
+                </div>
+            </form>
         </div>
     </div>
 

@@ -27,6 +27,14 @@ document.addEventListener('DOMContentLoaded', () => {
         console.error('Backend form not found!');
     }
 
+    const editBackendForm = document.getElementById('edit-backend-form');
+    if (editBackendForm) {
+        console.log('Edit backend form found, attaching event listener');
+        editBackendForm.addEventListener('submit', handleEditBackend);
+    } else {
+        console.error('Edit backend form not found!');
+    }
+
     document.getElementById('filter-user').addEventListener('change', handleFilterKeys);
     document.getElementById('batch-create-btn').addEventListener('click', handleBatchCreate);
 
@@ -843,6 +851,9 @@ async function loadBackends() {
                         ${backend.is_default ? '<span class="badge badge-success">Yes</span>' : '-'}
                     </td>
                     <td class="actions">
+                        <button class="btn btn-sm btn-primary" onclick='openEditBackendModal(${JSON.stringify(backend)})'>
+                            Edit
+                        </button>
                         <button class="btn btn-sm btn-primary" onclick="handleToggleBackendStatus(${backend.id}, ${!backend.is_active})">
                             ${backend.is_active ? 'Deactivate' : 'Activate'}
                         </button>
@@ -994,5 +1005,77 @@ async function handleDeleteBackend(backendId) {
     } catch (error) {
         console.error('Error deleting backend:', error);
         showAlert('Failed to delete backend: ' + error.message, 'error');
+    }
+}
+
+// Open edit backend modal
+function openEditBackendModal(backend) {
+    console.log('Opening edit modal for backend:', backend);
+
+    // Populate form fields
+    document.getElementById('edit-backend-id').value = backend.id;
+    document.getElementById('edit-backend-short-name').value = backend.short_name;
+    document.getElementById('edit-backend-name').value = backend.name;
+    document.getElementById('edit-backend-base-url').value = backend.base_url;
+    document.getElementById('edit-backend-api-key').value = backend.api_key;
+    document.getElementById('edit-backend-default-model').value = backend.default_model || '';
+    document.getElementById('edit-backend-is-default').value = backend.is_default ? 'true' : 'false';
+
+    // Show modal
+    document.getElementById('edit-backend-modal').classList.add('show');
+}
+
+// Close edit backend modal
+function closeEditBackendModal() {
+    document.getElementById('edit-backend-modal').classList.remove('show');
+    document.getElementById('edit-backend-form').reset();
+}
+
+// Handle edit backend form submission
+async function handleEditBackend(e) {
+    console.log('handleEditBackend called');
+    if (e) {
+        e.preventDefault();
+        console.log('Default prevented');
+    }
+
+    const backendId = document.getElementById('edit-backend-id').value;
+    const data = {
+        short_name: document.getElementById('edit-backend-short-name').value,
+        name: document.getElementById('edit-backend-name').value,
+        base_url: document.getElementById('edit-backend-base-url').value,
+        api_key: document.getElementById('edit-backend-api-key').value,
+        default_model: document.getElementById('edit-backend-default-model').value || null,
+        is_default: document.getElementById('edit-backend-is-default').value === 'true'
+    };
+
+    console.log('Editing backend', backendId, 'with data:', data);
+
+    try {
+        const response = await fetchWithAuth(`${API_BASE}/admin/backends/${backendId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+
+        console.log('Edit backend response status:', response.status);
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to update backend');
+        }
+
+        const result = await response.json();
+        console.log('Backend updated successfully:', result);
+        showAlert(result.message, 'success');
+
+        // Close modal
+        closeEditBackendModal();
+
+        // Reload backends
+        await loadBackends();
+    } catch (error) {
+        console.error('Error updating backend:', error);
+        showAlert('Failed to update backend: ' + error.message, 'error');
     }
 }
