@@ -9,9 +9,26 @@ import json
 from pathlib import Path
 from dotenv import load_dotenv
 import time
+import base64
+import mimetypes
 
 # Default base URL
 DEFAULT_BASE_URL = "https://aiapi.iiis.co:9443"
+
+
+def encode_file(file_path):
+    """Encode a file to base64 and detect its MIME type."""
+    path = Path(file_path)
+    if not path.exists():
+        raise FileNotFoundError(f"File not found: {file_path}")
+
+    with open(path, 'rb') as f:
+        file_data = f.read()
+
+    base64_data = base64.b64encode(file_data).decode('utf-8')
+    mime_type = mimetypes.guess_type(file_path)[0] or 'application/octet-stream'
+
+    return base64_data, mime_type
 
 
 def load_api_key(env_file=".env"):
@@ -37,14 +54,30 @@ def load_api_key(env_file=".env"):
     return api_key
 
 
-def send_claude_format(base_url, api_key, message, model, max_tokens, stream):
+def send_claude_format(base_url, api_key, message, model, max_tokens, stream, files=None):
     """Send message using Claude API format (/v1/messages)."""
     url = f"{base_url}/v1/messages"
+
+    # Build content - can be string or array of content blocks
+    if files:
+        content = [{"type": "text", "text": message}]
+        for file_path in files:
+            base64_data, mime_type = encode_file(file_path)
+            content.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": mime_type,
+                    "data": base64_data
+                }
+            })
+    else:
+        content = message
 
     payload = {
         "max_tokens": max_tokens,
         "messages": [
-            {"role": "user", "content": message}
+            {"role": "user", "content": content}
         ]
     }
 
@@ -137,14 +170,28 @@ def send_claude_format(base_url, api_key, message, model, max_tokens, stream):
         return False
 
 
-def send_openai_format(base_url, api_key, message, model, max_tokens, stream):
+def send_openai_format(base_url, api_key, message, model, max_tokens, stream, files=None):
     """Send message using OpenAI API format (/v1/chat/completions)."""
     url = f"{base_url}/v1/chat/completions"
+
+    # Build content - can be string or array of content blocks
+    if files:
+        content = [{"type": "text", "text": message}]
+        for file_path in files:
+            base64_data, mime_type = encode_file(file_path)
+            content.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:{mime_type};base64,{base64_data}"
+                }
+            })
+    else:
+        content = message
 
     payload = {
         "max_tokens": max_tokens,
         "messages": [
-            {"role": "user", "content": message}
+            {"role": "user", "content": content}
         ]
     }
 
@@ -242,11 +289,11 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Simple message (Claude format)
+  # Simple message (OpenAI format, default)
   python test_chat.py "Hello, how are you?"
 
-  # OpenAI format
-  python test_chat.py "Hello!" --format openai
+  # Claude format
+  python test_chat.py "Hello!" --format claude
 
   # Custom model
   python test_chat.py "Explain quantum computing" --model gpt-4
@@ -256,6 +303,12 @@ Examples:
 
   # Streaming response
   python test_chat.py "Count to 10" --stream
+
+  # Multi-modal with image
+  python test_chat.py "What's in this image?" --files image.jpg
+
+  # Multi-modal with multiple files
+  python test_chat.py "Analyze these images" --files img1.jpg img2.png
 
   # Different server
   python test_chat.py "Test" --url http://localhost:8000
@@ -273,8 +326,8 @@ Examples:
     parser.add_argument(
         '--format',
         choices=['claude', 'openai'],
-        default='claude',
-        help='API format to use (default: claude)'
+        default='openai',
+        help='API format to use (default: openai)'
     )
 
     parser.add_argument(
@@ -308,6 +361,12 @@ Examples:
         help=f'Base URL of the proxy server (default: {DEFAULT_BASE_URL})'
     )
 
+    parser.add_argument(
+        '--files',
+        nargs='*',
+        help='List of file paths to include (images, PDFs, etc.)'
+    )
+
     args = parser.parse_args()
 
     # Disable SSL warnings
@@ -331,11 +390,11 @@ Examples:
     # Send message
     if args.format == 'claude':
         success = send_claude_format(
-            args.url, api_key, args.message, args.model, args.max_tokens, args.stream
+            args.url, api_key, args.message, args.model, args.max_tokens, args.stream, args.files
         )
     else:
         success = send_openai_format(
-            args.url, api_key, args.message, args.model, args.max_tokens, args.stream
+            args.url, api_key, args.message, args.model, args.max_tokens, args.stream, args.files
         )
 
     print()

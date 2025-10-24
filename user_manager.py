@@ -82,12 +82,19 @@ class UserManager:
             ON usage_records(timestamp)
         """)
 
-        # Migration: Add model_name column if it doesn't exist
+        # Migration: Add model_name column to api_keys if it doesn't exist
         cursor.execute("PRAGMA table_info(api_keys)")
         columns = [col[1] for col in cursor.fetchall()]
         if 'model_name' not in columns:
             logger.info("Migrating database: adding model_name column to api_keys")
             cursor.execute("ALTER TABLE api_keys ADD COLUMN model_name TEXT")
+
+        # Migration: Add backend_url column to usage_records if it doesn't exist
+        cursor.execute("PRAGMA table_info(usage_records)")
+        usage_columns = [col[1] for col in cursor.fetchall()]
+        if 'backend_url' not in usage_columns:
+            logger.info("Migrating database: adding backend_url column to usage_records")
+            cursor.execute("ALTER TABLE usage_records ADD COLUMN backend_url TEXT")
 
         conn.commit()
         conn.close()
@@ -214,9 +221,10 @@ class UserManager:
         input_tokens: int,
         output_tokens: int,
         model: Optional[str] = None,
-        request_id: Optional[str] = None
+        request_id: Optional[str] = None,
+        backend_url: Optional[str] = None
     ):
-        """Track token usage for an API key."""
+        """Track token usage for an API key with actual backend model used."""
         total_tokens = input_tokens + output_tokens
 
         conn = sqlite3.connect(self.db_path)
@@ -226,11 +234,11 @@ class UserManager:
             cursor.execute("""
                 INSERT INTO usage_records
                 (api_key_id, endpoint, model, input_tokens, output_tokens,
-                 total_tokens, request_id, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                 total_tokens, request_id, timestamp, backend_url)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 api_key_id, endpoint, model, input_tokens, output_tokens,
-                total_tokens, request_id, datetime.utcnow().isoformat()
+                total_tokens, request_id, datetime.utcnow().isoformat(), backend_url
             ))
             conn.commit()
         finally:
@@ -261,7 +269,8 @@ class UserManager:
                     SUM(output_tokens) as total_output_tokens,
                     SUM(total_tokens) as total_tokens,
                     endpoint,
-                    model
+                    model,
+                    backend_url
                 FROM usage_records ur
                 JOIN api_keys ak ON ur.api_key_id = ak.id
                 WHERE ak.user_id = ?
@@ -276,7 +285,7 @@ class UserManager:
                 query += " AND ur.timestamp <= ?"
                 params.append(end_date)
 
-            query += " GROUP BY endpoint, model"
+            query += " GROUP BY endpoint, model, backend_url"
 
             cursor.execute(query, params)
 
@@ -330,6 +339,137 @@ class UserManager:
                 'total_input_tokens': row['total_input_tokens'] or 0,
                 'total_output_tokens': row['total_output_tokens'] or 0,
                 'total_tokens': row['total_tokens'] or 0
+            }
+
+        finally:
+            conn.close()
+
+    def get_all_usage_by_backend(self) -> Dict[str, Any]:
+        """Get usage statistics grouped by backend URL and model."""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute("""
+                SELECT
+                    backend_url,
+                    model,
+                    COUNT(*) as total_requests,
+                    SUM(input_tokens) as total_input_tokens,
+                    SUM(output_tokens) as total_output_tokens,
+                    SUM(total_tokens) as total_tokens
+                FROM usage_records
+                GROUP BY backend_url, model
+                ORDER BY total_tokens DESC
+            """)
+
+            usage_by_backend = []
+            total_input = 0
+            total_output = 0
+            total_requests = 0
+
+            for row in cursor.fetchall():
+                usage_by_backend.append(dict(row))
+                total_input += row['total_input_tokens'] or 0
+                total_output += row['total_output_tokens'] or 0
+                total_requests += row['total_requests'] or 0
+
+            return {
+                'total_requests': total_requests,
+                'total_input_tokens': total_input,
+                'total_output_tokens': total_output,
+                'total_tokens': total_input + total_output,
+                'usage_by_backend': usage_by_backend
+            }
+
+        finally:
+            conn.close()
+
+    def get_api_key_usage_by_backend(self, api_key_id: int) -> Dict[str, Any]:
+        """Get usage statistics for a specific API key grouped by backend URL and model."""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute("""
+                SELECT
+                    backend_url,
+                    model,
+                    COUNT(*) as total_requests,
+                    SUM(input_tokens) as total_input_tokens,
+                    SUM(output_tokens) as total_output_tokens,
+                    SUM(total_tokens) as total_tokens
+                FROM usage_records
+                WHERE api_key_id = ?
+                GROUP BY backend_url, model
+                ORDER BY total_tokens DESC
+            """, (api_key_id,))
+
+            usage_by_backend = []
+            total_input = 0
+            total_output = 0
+            total_requests = 0
+
+            for row in cursor.fetchall():
+                usage_by_backend.append(dict(row))
+                total_input += row['total_input_tokens'] or 0
+                total_output += row['total_output_tokens'] or 0
+                total_requests += row['total_requests'] or 0
+
+            return {
+                'api_key_id': api_key_id,
+                'total_requests': total_requests,
+                'total_input_tokens': total_input,
+                'total_output_tokens': total_output,
+                'total_tokens': total_input + total_output,
+                'usage_by_backend': usage_by_backend
+            }
+
+        finally:
+            conn.close()
+
+    def get_user_usage_by_backend(self, user_id: int) -> Dict[str, Any]:
+        """Get usage statistics for a specific user grouped by backend URL and model."""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute("""
+                SELECT
+                    backend_url,
+                    model,
+                    COUNT(*) as total_requests,
+                    SUM(ur.input_tokens) as total_input_tokens,
+                    SUM(ur.output_tokens) as total_output_tokens,
+                    SUM(ur.total_tokens) as total_tokens
+                FROM usage_records ur
+                JOIN api_keys ak ON ur.api_key_id = ak.id
+                WHERE ak.user_id = ?
+                GROUP BY backend_url, model
+                ORDER BY total_tokens DESC
+            """, (user_id,))
+
+            usage_by_backend = []
+            total_input = 0
+            total_output = 0
+            total_requests = 0
+
+            for row in cursor.fetchall():
+                usage_by_backend.append(dict(row))
+                total_input += row['total_input_tokens'] or 0
+                total_output += row['total_output_tokens'] or 0
+                total_requests += row['total_requests'] or 0
+
+            return {
+                'user_id': user_id,
+                'total_requests': total_requests,
+                'total_input_tokens': total_input,
+                'total_output_tokens': total_output,
+                'total_tokens': total_input + total_output,
+                'usage_by_backend': usage_by_backend
             }
 
         finally:

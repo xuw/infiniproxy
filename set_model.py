@@ -70,6 +70,76 @@ def get_current_model(base_url, api_key):
         return None
 
 
+def list_backend_models(base_url, api_key):
+    """List all models available from the backend via proxy."""
+    try:
+        models_url = f"{base_url}/v1/models"
+
+        print(f"🔍 Querying models from proxy: {models_url}")
+        print()
+
+        # Query the proxy's models endpoint
+        models_response = requests.get(
+            models_url,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            },
+            verify=False,
+            timeout=10
+        )
+
+        if models_response.status_code == 200:
+            data = models_response.json()
+
+            # Handle different response formats
+            if 'data' in data:
+                models = data['data']
+            elif 'models' in data:
+                models = data['models']
+            elif isinstance(data, list):
+                models = data
+            else:
+                models = [data]
+
+            print("📋 Available Models:")
+            print("=" * 80)
+
+            if not models:
+                print("No models found")
+                return []
+
+            # Display models
+            for i, model in enumerate(models, 1):
+                if isinstance(model, dict):
+                    model_id = model.get('id') or model.get('model') or model.get('name', 'Unknown')
+                    created = model.get('created', '')
+                    owned_by = model.get('owned_by', '')
+
+                    print(f"{i}. {model_id}")
+                    if created:
+                        print(f"   Created: {created}")
+                    if owned_by:
+                        print(f"   Owner: {owned_by}")
+                    print()
+                else:
+                    print(f"{i}. {model}")
+                    print()
+
+            return models
+        else:
+            print(f"❌ Failed to list models: {models_response.status_code}")
+            print(f"   Response: {models_response.text}")
+            return None
+
+    except requests.exceptions.Timeout:
+        print(f"❌ Request timeout while fetching models")
+        return None
+    except Exception as e:
+        print(f"❌ Error listing models: {e}")
+        return None
+
+
 def set_model(base_url, api_key, model_name):
     """Set the model for the API key."""
     try:
@@ -105,6 +175,9 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  # List all available models from backend
+  python set_model.py --list-models
+
   # Set model to gpt-4
   python set_model.py gpt-4
 
@@ -144,6 +217,12 @@ Examples:
     )
 
     parser.add_argument(
+        '--list-models',
+        action='store_true',
+        help='List all models available from the backend'
+    )
+
+    parser.add_argument(
         '--env-file',
         default='.env',
         help='Path to .env file (default: .env)'
@@ -180,6 +259,19 @@ Examples:
     if args.check:
         # Just checking, exit
         return 0 if current else 1
+
+    if args.list_models:
+        # List available models from backend via proxy
+        print()
+        models = list_backend_models(args.url, api_key)
+        print()
+        print("="*80)
+        if models is not None:
+            print(f"✅ Found {len(models)} models")
+        else:
+            print("❌ Failed to list models")
+        print("="*80)
+        return 0 if models is not None else 1
 
     # Determine what to do
     if args.unset:

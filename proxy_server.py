@@ -11,6 +11,7 @@ import json
 import os
 import csv
 import io
+import requests
 from typing import Dict, Any, Optional, List
 
 from config import ProxyConfig
@@ -218,6 +219,56 @@ async def health():
     }
 
 
+@app.get("/v1/models")
+async def list_models(user_info: Dict[str, Any] = Depends(get_current_user)):
+    """
+    List available models from the backend.
+
+    This endpoint forwards the request to the backend's /v1/models endpoint.
+    Requires authentication via Bearer token.
+    """
+    try:
+        # Extract base URL from backend_url (remove /chat/completions or /messages)
+        backend_url = config.openai_base_url
+        if '/chat/completions' in backend_url:
+            models_base_url = backend_url.replace('/chat/completions', '')
+        elif '/messages' in backend_url:
+            models_base_url = backend_url.replace('/messages', '')
+        else:
+            models_base_url = backend_url
+
+        models_url = f"{models_base_url}/models"
+
+        logger.info(f"Forwarding /v1/models request to backend: {models_url}")
+
+        # Forward request to backend
+        response = requests.get(
+            models_url,
+            headers={
+                "Authorization": f"Bearer {config.openai_api_key}",
+                "Content-Type": "application/json"
+            },
+            timeout=10
+        )
+
+        if response.status_code == 200:
+            logger.info(f"Successfully retrieved models list from backend")
+            return response.json()
+        else:
+            logger.error(f"Backend returned error: {response.status_code} - {response.text}")
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=f"Backend error: {response.text}"
+            )
+
+    except requests.exceptions.Timeout:
+        logger.error("Timeout while fetching models from backend")
+        raise HTTPException(status_code=504, detail="Backend timeout")
+    except Exception as e:
+        logger.error(f"Error fetching models: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/admin/login")
 async def admin_login(request: Request):
     """
@@ -405,14 +456,17 @@ async def chat_completions(
             preview = content[:200] + "..." if len(content) > 200 else content
             logger.info(f"Response preview: {preview}")
 
-        # Track usage
+        # Track usage with actual backend model used
+        # Use model from response, or fall back to what we actually sent (not user input)
+        backend_model = openai_response.get('model', openai_request.get('model'))
         user_manager.track_usage(
             api_key_id=user_info['api_key_id'],
             endpoint='/v1/chat/completions',
             input_tokens=prompt_tokens,
             output_tokens=completion_tokens,
-            model=model,
-            request_id=request_id
+            model=backend_model,
+            request_id=request_id,
+            backend_url=config.openai_base_url
         )
         logger.info(f"✅ Usage tracked for user {user_info['username']}")
 
@@ -574,14 +628,17 @@ async def create_message(
 
         logger.debug(f"Full Claude response: {json.dumps(claude_response, indent=2)}")
 
-        # Track usage
+        # Track usage with actual backend model used
+        # Use model from response, or fall back to what we actually sent (not user input)
+        backend_model = openai_response.get('model', openai_request.get('model'))
         user_manager.track_usage(
             api_key_id=user_info['api_key_id'],
             endpoint='/v1/messages',
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            model=original_model,
-            request_id=request_id
+            model=backend_model,
+            request_id=request_id,
+            backend_url=config.openai_base_url
         )
         logger.info(f"✅ Usage tracked for user {user_info['username']}")
 
@@ -843,6 +900,39 @@ async def get_api_key_usage_endpoint(api_key_id: int):
     Admin endpoint.
     """
     usage = user_manager.get_api_key_usage(api_key_id)
+    return usage
+
+
+@app.get("/admin/usage/by-backend")
+async def get_usage_by_backend_endpoint():
+    """
+    Get usage statistics grouped by backend URL and model.
+
+    Admin endpoint - shows which backend models are actually being used.
+    """
+    usage = user_manager.get_all_usage_by_backend()
+    return usage
+
+
+@app.get("/usage/api-key/{key_id}/by-backend")
+async def get_api_key_usage_by_backend_endpoint(key_id: int):
+    """
+    Get usage statistics for a specific API key grouped by backend URL and model.
+
+    Shows which backend models are being used by this specific API key.
+    """
+    usage = user_manager.get_api_key_usage_by_backend(key_id)
+    return usage
+
+
+@app.get("/admin/users/{user_id}/usage/by-backend")
+async def get_user_usage_by_backend_endpoint(user_id: int):
+    """
+    Get usage statistics for a specific user grouped by backend URL and model.
+
+    Admin endpoint - shows which backend models are being used by this user across all their API keys.
+    """
+    usage = user_manager.get_user_usage_by_backend(user_id)
     return usage
 
 

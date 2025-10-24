@@ -263,8 +263,9 @@ async function handleBatchCreate() {
 function populateUserSelects() {
     const selects = [
         document.getElementById('key-user-id'),
-        document.getElementById('filter-user')
-    ];
+        document.getElementById('filter-user'),
+        document.getElementById('user-usage-id')
+    ].filter(s => s !== null);  // Filter out null elements
 
     selects.forEach(select => {
         const currentValue = select.value;
@@ -464,11 +465,17 @@ async function loadUsageStats() {
     document.getElementById('usage-stats').style.display = 'none';
 
     try {
+        // Load basic usage stats
         const response = await fetch(`${API_BASE}/usage/api-key/${keyId}`);
         const data = await response.json();
 
-        if (response.ok) {
+        // Load per-API-key backend usage
+        const backendResponse = await fetchWithAuth(`${API_BASE}/usage/api-key/${keyId}/by-backend`);
+        const backendData = await backendResponse.json();
+
+        if (response.ok && backendResponse.ok) {
             displayUsageStats(data);
+            displayKeyBackendUsage(backendData);
             document.getElementById('usage-stats').style.display = 'block';
         } else {
             showAlert('Failed to load usage statistics', 'error');
@@ -486,6 +493,154 @@ function displayUsageStats(data) {
     document.getElementById('stat-input').textContent = formatNumber(data.total_input_tokens);
     document.getElementById('stat-output').textContent = formatNumber(data.total_output_tokens);
     document.getElementById('stat-total').textContent = formatNumber(data.total_tokens);
+}
+
+function displayKeyBackendUsage(data) {
+    const tbody = document.getElementById('key-backend-usage-table-body');
+
+    if (!data.usage_by_backend || data.usage_by_backend.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="6" class="empty-state">
+                    <div class="empty-state-icon">📊</div>
+                    <div>No backend usage data found for this API key.</div>
+                </td>
+            </tr>
+        `;
+        return;
+    }
+
+    tbody.innerHTML = data.usage_by_backend.map(usage => `
+        <tr>
+            <td><code class="key-display">${usage.backend_url || 'Unknown'}</code></td>
+            <td><code class="key-display">${usage.model || 'Unknown'}</code></td>
+            <td>${formatNumber(usage.total_requests)}</td>
+            <td>${formatNumber(usage.total_input_tokens)}</td>
+            <td>${formatNumber(usage.total_output_tokens)}</td>
+            <td><strong>${formatNumber(usage.total_tokens)}</strong></td>
+        </tr>
+    `).join('');
+}
+
+// Backend Usage Statistics
+async function loadBackendUsage() {
+    document.getElementById('backend-usage-loading').style.display = 'block';
+    document.getElementById('backend-usage-stats').style.display = 'none';
+
+    try {
+        const response = await fetchWithAuth(`${API_BASE}/admin/usage/by-backend`);
+        const data = await response.json();
+
+        if (response.ok) {
+            displayBackendUsage(data);
+            document.getElementById('backend-usage-stats').style.display = 'block';
+        } else {
+            showAlert('Failed to load backend usage statistics', 'error');
+        }
+    } catch (error) {
+        console.error('Error loading backend usage:', error);
+        showAlert('Failed to load backend usage statistics', 'error');
+    } finally {
+        document.getElementById('backend-usage-loading').style.display = 'none';
+    }
+}
+
+function displayBackendUsage(data) {
+    // Update summary stats
+    document.getElementById('backend-stat-requests').textContent = formatNumber(data.total_requests);
+    document.getElementById('backend-stat-input').textContent = formatNumber(data.total_input_tokens);
+    document.getElementById('backend-stat-output').textContent = formatNumber(data.total_output_tokens);
+    document.getElementById('backend-stat-total').textContent = formatNumber(data.total_tokens);
+
+    // Display table
+    const tbody = document.getElementById('backend-usage-table-body');
+
+    if (!data.usage_by_backend || data.usage_by_backend.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="6" class="empty-state">
+                    <div class="empty-state-icon">📊</div>
+                    <div>No backend usage data found. Start making API requests to see statistics.</div>
+                </td>
+            </tr>
+        `;
+        return;
+    }
+
+    tbody.innerHTML = data.usage_by_backend.map(usage => `
+        <tr>
+            <td><code class="key-display">${usage.backend_url || 'Unknown'}</code></td>
+            <td><code class="key-display">${usage.model || 'Unknown'}</code></td>
+            <td>${formatNumber(usage.total_requests)}</td>
+            <td>${formatNumber(usage.total_input_tokens)}</td>
+            <td>${formatNumber(usage.total_output_tokens)}</td>
+            <td><strong>${formatNumber(usage.total_tokens)}</strong></td>
+        </tr>
+    `).join('');
+}
+
+// User Backend Usage Statistics
+async function loadUserBackendUsage() {
+    const userId = document.getElementById('user-usage-id').value;
+
+    if (!userId) {
+        showAlert('Please select a user', 'error');
+        return;
+    }
+
+    document.getElementById('user-backend-usage-loading').style.display = 'block';
+    document.getElementById('user-backend-usage-stats').style.display = 'none';
+
+    try {
+        const response = await fetchWithAuth(`${API_BASE}/admin/users/${userId}/usage/by-backend`);
+        const data = await response.json();
+
+        if (response.ok) {
+            displayUserBackendUsage(data);
+            document.getElementById('user-backend-usage-stats').style.display = 'block';
+        } else {
+            showAlert('Failed to load user backend usage statistics', 'error');
+        }
+    } catch (error) {
+        console.error('Error loading user backend usage:', error);
+        showAlert('Failed to load user backend usage statistics', 'error');
+    } finally {
+        document.getElementById('user-backend-usage-loading').style.display = 'none';
+    }
+}
+
+function displayUserBackendUsage(data) {
+    // Update summary stats
+    document.getElementById('user-backend-stat-requests').textContent = formatNumber(data.total_requests);
+    document.getElementById('user-backend-stat-input').textContent = formatNumber(data.total_input_tokens);
+    document.getElementById('user-backend-stat-output').textContent = formatNumber(data.total_output_tokens);
+    document.getElementById('user-backend-stat-total').textContent = formatNumber(data.total_tokens);
+
+    // Display table
+    const tbody = document.getElementById('user-backend-usage-table-body');
+
+    if (!data.usage_by_backend || data.usage_by_backend.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="6" class="empty-state">
+                    <div class="empty-state-icon">📊</div>
+                    <div>No backend usage data found for this user.</div>
+                </td>
+            </tr>
+        `;
+        return;
+    }
+
+    tbody.innerHTML = data.usage_by_backend.map(usage => `
+        <tr>
+            <td><code class="key-display">${usage.backend_url || 'Unknown'}</code></td>
+            <td><code class="key-display">${usage.model || 'Unknown'}</code></td>
+            <td>${formatNumber(usage.total_requests)}</td>
+            <td>${formatNumber(usage.total_input_tokens)}</td>
+            <td>${formatNumber(usage.total_output_tokens)}</td>
+            <td><strong>${formatNumber(usage.total_tokens)}</strong></td>
+        </tr>
+    `).join('');
 }
 
 // Utility Functions

@@ -497,9 +497,135 @@
                             <div class="stat-value" id="stat-total">-</div>
                         </div>
                     </div>
+
+                    <div class="section">
+                        <h3 class="section-title">Usage by Backend and Model (This API Key)</h3>
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Backend URL</th>
+                                        <th>Model</th>
+                                        <th>Requests</th>
+                                        <th>Input Tokens</th>
+                                        <th>Output Tokens</th>
+                                        <th>Total Tokens</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="key-backend-usage-table-body"></tbody>
+                            </table>
+                        </div>
+                    </div>
                 </div>
 
                 <div id="usage-loading" class="loading" style="display: none;">Loading usage statistics...</div>
+
+                <div class="section">
+                    <h2 class="section-title">Per-User Backend Usage</h2>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="user-usage-id">Select User</label>
+                            <select id="user-usage-id">
+                                <option value="">Select a user...</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <button type="button" class="btn btn-primary" onclick="loadUserBackendUsage()" style="margin-top: 28px;">Load User Backend Usage</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="user-backend-usage-loading" class="loading" style="display: none;">Loading user backend usage...</div>
+
+                <div id="user-backend-usage-stats" style="display: none;">
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-label">Total Requests</div>
+                            <div class="stat-value" id="user-backend-stat-requests">-</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Input Tokens</div>
+                            <div class="stat-value" id="user-backend-stat-input">-</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Output Tokens</div>
+                            <div class="stat-value" id="user-backend-stat-output">-</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Total Tokens</div>
+                            <div class="stat-value" id="user-backend-stat-total">-</div>
+                        </div>
+                    </div>
+
+                    <div class="section">
+                        <h3 class="section-title">Usage by Backend and Model (This User)</h3>
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Backend URL</th>
+                                        <th>Model</th>
+                                        <th>Requests</th>
+                                        <th>Input Tokens</th>
+                                        <th>Output Tokens</th>
+                                        <th>Total Tokens</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="user-backend-usage-table-body"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h2 class="section-title">Backend Model Usage</h2>
+                    <p style="color: #718096; margin-bottom: 20px;">
+                        Shows actual backend models used across all API keys, grouped by backend URL and model.
+                    </p>
+                    <button type="button" class="btn btn-primary" onclick="loadBackendUsage()">Load Backend Usage</button>
+                </div>
+
+                <div id="backend-usage-loading" class="loading" style="display: none;">Loading backend usage...</div>
+
+                <div id="backend-usage-stats" style="display: none;">
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-label">Total Requests</div>
+                            <div class="stat-value" id="backend-stat-requests">-</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Input Tokens</div>
+                            <div class="stat-value" id="backend-stat-input">-</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Output Tokens</div>
+                            <div class="stat-value" id="backend-stat-output">-</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Total Tokens</div>
+                            <div class="stat-value" id="backend-stat-total">-</div>
+                        </div>
+                    </div>
+
+                    <div class="section">
+                        <h3 class="section-title">Usage by Backend and Model</h3>
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Backend URL</th>
+                                        <th>Model</th>
+                                        <th>Requests</th>
+                                        <th>Input Tokens</th>
+                                        <th>Output Tokens</th>
+                                        <th>Total Tokens</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="backend-usage-table-body"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
