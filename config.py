@@ -25,8 +25,8 @@ class ProxyConfig:
     # Optional settings
     timeout: int = 300  # 5 minutes
     debug: bool = False
-    max_input_tokens: int = 200000  # Maximum input tokens
-    max_output_tokens: int = 200000  # Maximum output tokens
+    max_input_tokens: int = 409600  # Maximum input tokens (400k)
+    max_output_tokens: int = 409600  # Maximum output tokens (400k)
 
     @classmethod
     def from_env(cls) -> "ProxyConfig":
@@ -42,8 +42,8 @@ class ProxyConfig:
             proxy_port=int(os.getenv("PROXY_PORT", "8000")),
             timeout=int(os.getenv("TIMEOUT", "300")),
             debug=os.getenv("DEBUG", "false").lower() == "true",
-            max_input_tokens=int(os.getenv("MAX_INPUT_TOKENS", "200000")),
-            max_output_tokens=int(os.getenv("MAX_OUTPUT_TOKENS", "200000")),
+            max_input_tokens=int(os.getenv("MAX_INPUT_TOKENS", "409600")),
+            max_output_tokens=int(os.getenv("MAX_OUTPUT_TOKENS", "409600")),
         )
 
     def validate(self) -> None:

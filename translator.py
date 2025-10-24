@@ -9,7 +9,7 @@ import uuid
 class APITranslator:
     """Translates between Claude and OpenAI API formats."""
 
-    def __init__(self, openai_model: str, max_input_tokens: int = 200000, max_output_tokens: int = 200000):
+    def __init__(self, openai_model: str, max_input_tokens: int = 409600, max_output_tokens: int = 409600):
         """Initialize translator with OpenAI model name and token limits."""
         self.openai_model = openai_model
         self.max_input_tokens = max_input_tokens
