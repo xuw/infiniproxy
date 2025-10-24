@@ -531,7 +531,8 @@ async def chat_completions(
         logger.info(f"Resolved backend: {backend.get('short_name', 'default')} | Model: {resolved_model}")
 
         # Store for fallback and usage tracking
-        fallback_model = resolved_model
+        # Fallback model should be the backend's default model, not the user-specified one
+        fallback_model = backend.get('default_model') or config.openai_model
         client_specified_model = original_had_model
 
         # Handle streaming vs non-streaming
