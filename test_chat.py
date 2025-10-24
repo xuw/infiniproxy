@@ -403,8 +403,8 @@ Examples:
     parser.add_argument(
         '--max-tokens',
         type=int,
-        default=409600,
-        help='Maximum tokens in response (default: 409600 / 400k)'
+        default=8192,
+        help='Maximum tokens in response (default: 8192)'
     )
 
     parser.add_argument(
