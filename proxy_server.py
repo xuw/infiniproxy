@@ -552,7 +552,15 @@ async def chat_completions(
                     # Check if this is a model error and we can retry with fallback
                     is_model_error = False
                     error_str = str(e).lower()
-                    if 'model' in error_str and ('not found' in error_str or 'does not exist' in error_str or 'invalid' in error_str or '400' in error_str):
+
+                    # Check for model-related errors or generic 400 errors (likely model issues)
+                    if 'model' in error_str and ('not found' in error_str or 'does not exist' in error_str or 'invalid' in error_str):
+                        is_model_error = True
+                    elif '400' in error_str or 'bad request' in error_str:
+                        # 400 errors on streaming are often model-related
+                        is_model_error = True
+                    elif 'attempted to access streaming response content' in error_str:
+                        # This specific error occurs with 400 status from httpx
                         is_model_error = True
 
                     if hasattr(e, 'response') and e.response:
