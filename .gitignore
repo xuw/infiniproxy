@@ -37,3 +37,10 @@ htmlcov/
 
 # Kubernetes secrets (contains real API keys)
 k8s/secrets.yaml
+
+# Test files
+test_*.mp3
+cat.jpg
+
+# Local settings
+.claude/settings.local.json

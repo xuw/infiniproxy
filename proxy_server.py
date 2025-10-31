@@ -1,6 +1,6 @@
 """Main proxy server for translating between Claude and OpenAI APIs."""
 
-from fastapi import FastAPI, HTTPException, Request, Depends, Header, Cookie, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, Request, Depends, Header, Cookie, UploadFile, File, Form, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, HTMLResponse, Response, RedirectResponse, StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
@@ -12,6 +12,8 @@ import os
 import csv
 import io
 import requests
+import websockets
+import asyncio
 from typing import Dict, Any, Optional, List
 
 from config import ProxyConfig
@@ -188,6 +190,22 @@ async def root():
         "endpoints": {
             "claude_messages": "/v1/messages (Claude API format)",
             "openai_chat": "/v1/chat/completions (OpenAI API format - pass-through)",
+            "firecrawl_scrape": "/v1/firecrawl/scrape (Firecrawl scrape endpoint)",
+            "firecrawl_crawl": "/v1/firecrawl/crawl (Firecrawl crawl endpoint)",
+            "firecrawl_search": "/v1/firecrawl/search (Firecrawl search endpoint)",
+            "firecrawl_status": "/v1/firecrawl/crawl/status/{job_id} (Firecrawl status endpoint)",
+            "elevenlabs_tts": "/v1/elevenlabs/text-to-speech (ElevenLabs text-to-speech)",
+            "elevenlabs_tts_stream": "/v1/elevenlabs/text-to-speech/stream (ElevenLabs TTS streaming)",
+            "elevenlabs_tts_ws": "/v1/elevenlabs/text-to-speech/websocket (ElevenLabs TTS WebSocket)",
+            "elevenlabs_stt": "/v1/elevenlabs/speech-to-text (ElevenLabs speech-to-text)",
+            "elevenlabs_stt_ws": "/v1/elevenlabs/speech-to-text/websocket (ElevenLabs STT WebSocket)",
+            "serpapi_search": "/v1/serpapi/search (SerpAPI Google Search)",
+            "serpapi_images": "/v1/serpapi/images (SerpAPI Google Images)",
+            "serpapi_news": "/v1/serpapi/news (SerpAPI Google News)",
+            "serpapi_shopping": "/v1/serpapi/shopping (SerpAPI Google Shopping)",
+            "serpapi_maps": "/v1/serpapi/maps (SerpAPI Google Maps)",
+            "tavily_search": "/v1/tavily/search (Tavily AI Search)",
+            "tavily_extract": "/v1/tavily/extract (Tavily Content Extraction)",
             "health": "/health",
             "admin_ui": "/admin (Web-based admin interface)"
         }
@@ -1646,6 +1664,1571 @@ async def set_model_setting(
     except Exception as e:
         logger.error(f"Error setting model: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to set model: {str(e)}")
+
+
+# ===== Firecrawl Proxy Endpoints =====
+
+@app.post("/v1/firecrawl/scrape")
+async def firecrawl_scrape(
+    request: Request,
+    user_info: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Firecrawl scrape endpoint - proxy to Firecrawl API.
+
+    Scrapes a single URL and returns the content.
+
+    Requires authentication via Bearer token.
+    """
+    start_time = time.time()
+
+    try:
+        # Get Firecrawl configuration from environment
+        firecrawl_api_key = os.getenv("FIRECRAWL_API_KEY")
+        firecrawl_base_url = os.getenv("FIRECRAWL_BASE_URL", "https://api.firecrawl.dev/v1")
+
+        if not firecrawl_api_key:
+            raise HTTPException(
+                status_code=503,
+                detail="Firecrawl API key not configured"
+            )
+
+        # Parse request body
+        body = await request.json()
+        url = body.get("url")
+
+        if not url:
+            raise HTTPException(status_code=400, detail="URL is required")
+
+        logger.info("=" * 80)
+        logger.info(f"📥 FIRECRAWL SCRAPE REQUEST")
+        logger.info(f"User: {user_info['username']} (ID: {user_info['user_id']})")
+        logger.info(f"URL: {url}")
+        logger.info(f"Options: {body.get('formats', ['markdown'])}")
+
+        # Forward request to Firecrawl API
+        firecrawl_url = f"{firecrawl_base_url}/scrape"
+        headers = {
+            "Authorization": f"Bearer {firecrawl_api_key}",
+            "Content-Type": "application/json"
+        }
+
+        response = requests.post(
+            firecrawl_url,
+            headers=headers,
+            json=body,
+            timeout=config.timeout
+        )
+
+        response.raise_for_status()
+        result = response.json()
+
+        elapsed_time = time.time() - start_time
+        logger.info(f"✅ FIRECRAWL SCRAPE COMPLETED")
+        logger.info(f"Duration: {elapsed_time:.2f}s")
+        logger.info(f"Status: {result.get('success', False)}")
+        logger.info("=" * 80)
+
+        # Track usage
+        user_manager.track_usage(
+            api_key_id=user_info['api_key_id'],
+            endpoint='/v1/firecrawl/scrape',
+            input_tokens=0,
+            output_tokens=0,
+            model='firecrawl-scrape',
+            request_id=None,
+            backend_url=firecrawl_base_url
+        )
+
+        return JSONResponse(content=result)
+
+    except requests.exceptions.HTTPError as e:
+        elapsed_time = time.time() - start_time
+        logger.error("=" * 80)
+        logger.error(f"❌ FIRECRAWL API ERROR")
+        logger.error(f"Duration: {elapsed_time:.2f}s")
+        logger.error(f"Error: {e}")
+        if e.response is not None:
+            logger.error(f"Response: {e.response.text}")
+        logger.error("=" * 80)
+        raise HTTPException(status_code=e.response.status_code if e.response else 500, detail=str(e))
+
+    except Exception as e:
+        elapsed_time = time.time() - start_time
+        logger.error("=" * 80)
+        logger.error(f"❌ INTERNAL ERROR")
+        logger.error(f"Duration: {elapsed_time:.2f}s")
+        logger.error(f"Error: {str(e)}")
+        logger.error("=" * 80)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.post("/v1/firecrawl/crawl")
+async def firecrawl_crawl(
+    request: Request,
+    user_info: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Firecrawl crawl endpoint - proxy to Firecrawl API.
+
+    Starts a crawl job for a website.
+
+    Requires authentication via Bearer token.
+    """
+    start_time = time.time()
+
+    try:
+        # Get Firecrawl configuration from environment
+        firecrawl_api_key = os.getenv("FIRECRAWL_API_KEY")
+        firecrawl_base_url = os.getenv("FIRECRAWL_BASE_URL", "https://api.firecrawl.dev/v1")
+
+        if not firecrawl_api_key:
+            raise HTTPException(
+                status_code=503,
+                detail="Firecrawl API key not configured"
+            )
+
+        # Parse request body
+        body = await request.json()
+        url = body.get("url")
+
+        if not url:
+            raise HTTPException(status_code=400, detail="URL is required")
+
+        logger.info("=" * 80)
+        logger.info(f"📥 FIRECRAWL CRAWL REQUEST")
+        logger.info(f"User: {user_info['username']} (ID: {user_info['user_id']})")
+        logger.info(f"URL: {url}")
+        logger.info(f"Max depth: {body.get('limit', 100)}")
+
+        # Forward request to Firecrawl API
+        firecrawl_url = f"{firecrawl_base_url}/crawl"
+        headers = {
+            "Authorization": f"Bearer {firecrawl_api_key}",
+            "Content-Type": "application/json"
+        }
+
+        response = requests.post(
+            firecrawl_url,
+            headers=headers,
+            json=body,
+            timeout=config.timeout
+        )
+
+        response.raise_for_status()
+        result = response.json()
+
+        elapsed_time = time.time() - start_time
+        logger.info(f"✅ FIRECRAWL CRAWL STARTED")
+        logger.info(f"Duration: {elapsed_time:.2f}s")
+        logger.info(f"Job ID: {result.get('id', 'N/A')}")
+        logger.info("=" * 80)
+
+        # Track usage
+        user_manager.track_usage(
+            api_key_id=user_info['api_key_id'],
+            endpoint='/v1/firecrawl/crawl',
+            input_tokens=0,
+            output_tokens=0,
+            model='firecrawl-crawl',
+            request_id=result.get('id'),
+            backend_url=firecrawl_base_url
+        )
+
+        return JSONResponse(content=result)
+
+    except requests.exceptions.HTTPError as e:
+        elapsed_time = time.time() - start_time
+        logger.error("=" * 80)
+        logger.error(f"❌ FIRECRAWL API ERROR")
+        logger.error(f"Duration: {elapsed_time:.2f}s")
+        logger.error(f"Error: {e}")
+        if e.response is not None:
+            logger.error(f"Response: {e.response.text}")
+        logger.error("=" * 80)
+        raise HTTPException(status_code=e.response.status_code if e.response else 500, detail=str(e))
+
+    except Exception as e:
+        elapsed_time = time.time() - start_time
+        logger.error("=" * 80)
+        logger.error(f"❌ INTERNAL ERROR")
+        logger.error(f"Duration: {elapsed_time:.2f}s")
+        logger.error(f"Error: {str(e)}")
+        logger.error("=" * 80)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.get("/v1/firecrawl/crawl/status/{job_id}")
+async def firecrawl_crawl_status(
+    job_id: str,
+    user_info: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Firecrawl crawl status endpoint - proxy to Firecrawl API.
+
+    Check the status of a crawl job.
+
+    Requires authentication via Bearer token.
+    """
+    start_time = time.time()
+
+    try:
+        # Get Firecrawl configuration from environment
+        firecrawl_api_key = os.getenv("FIRECRAWL_API_KEY")
+        firecrawl_base_url = os.getenv("FIRECRAWL_BASE_URL", "https://api.firecrawl.dev/v1")
+
+        if not firecrawl_api_key:
+            raise HTTPException(
+                status_code=503,
+                detail="Firecrawl API key not configured"
+            )
+
+        logger.info("=" * 80)
+        logger.info(f"📥 FIRECRAWL STATUS REQUEST")
+        logger.info(f"User: {user_info['username']} (ID: {user_info['user_id']})")
+        logger.info(f"Job ID: {job_id}")
+
+        # Forward request to Firecrawl API
+        firecrawl_url = f"{firecrawl_base_url}/crawl/status/{job_id}"
+        headers = {
+            "Authorization": f"Bearer {firecrawl_api_key}",
+            "Content-Type": "application/json"
+        }
+
+        response = requests.get(
+            firecrawl_url,
+            headers=headers,
+            timeout=config.timeout
+        )
+
+        response.raise_for_status()
+        result = response.json()
+
+        elapsed_time = time.time() - start_time
+        logger.info(f"✅ FIRECRAWL STATUS RETRIEVED")
+        logger.info(f"Duration: {elapsed_time:.2f}s")
+        logger.info(f"Status: {result.get('status', 'unknown')}")
+        logger.info("=" * 80)
+
+        return JSONResponse(content=result)
+
+    except requests.exceptions.HTTPError as e:
+        elapsed_time = time.time() - start_time
+        logger.error("=" * 80)
+        logger.error(f"❌ FIRECRAWL API ERROR")
+        logger.error(f"Duration: {elapsed_time:.2f}s")
+        logger.error(f"Error: {e}")
+        if e.response is not None:
+            logger.error(f"Response: {e.response.text}")
+        logger.error("=" * 80)
+        raise HTTPException(status_code=e.response.status_code if e.response else 500, detail=str(e))
+
+    except Exception as e:
+        elapsed_time = time.time() - start_time
+        logger.error("=" * 80)
+        logger.error(f"❌ INTERNAL ERROR")
+        logger.error(f"Duration: {elapsed_time:.2f}s")
+        logger.error(f"Error: {str(e)}")
+        logger.error("=" * 80)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.post("/v1/firecrawl/search")
+async def firecrawl_search(
+    request: Request,
+    user_info: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Firecrawl search endpoint - proxy to Firecrawl API.
+
+    Search the web and return results.
+
+    Requires authentication via Bearer token.
+    """
+    start_time = time.time()
+
+    try:
+        # Get Firecrawl configuration from environment
+        firecrawl_api_key = os.getenv("FIRECRAWL_API_KEY")
+        firecrawl_base_url = os.getenv("FIRECRAWL_BASE_URL", "https://api.firecrawl.dev/v1")
+
+        if not firecrawl_api_key:
+            raise HTTPException(
+                status_code=503,
+                detail="Firecrawl API key not configured"
+            )
+
+        # Parse request body
+        body = await request.json()
+        query = body.get("query")
+
+        if not query:
+            raise HTTPException(status_code=400, detail="Query is required")
+
+        logger.info("=" * 80)
+        logger.info(f"📥 FIRECRAWL SEARCH REQUEST")
+        logger.info(f"User: {user_info['username']} (ID: {user_info['user_id']})")
+        logger.info(f"Query: {query}")
+        logger.info(f"Limit: {body.get('limit', 10)}")
+
+        # Forward request to Firecrawl API
+        firecrawl_url = f"{firecrawl_base_url}/search"
+        headers = {
+            "Authorization": f"Bearer {firecrawl_api_key}",
+            "Content-Type": "application/json"
+        }
+
+        response = requests.post(
+            firecrawl_url,
+            headers=headers,
+            json=body,
+            timeout=config.timeout
+        )
+
+        response.raise_for_status()
+        result = response.json()
+
+        elapsed_time = time.time() - start_time
+        logger.info(f"✅ FIRECRAWL SEARCH COMPLETED")
+        logger.info(f"Duration: {elapsed_time:.2f}s")
+        logger.info(f"Results: {len(result.get('data', []))}")
+        logger.info("=" * 80)
+
+        # Track usage
+        user_manager.track_usage(
+            api_key_id=user_info['api_key_id'],
+            endpoint='/v1/firecrawl/search',
+            input_tokens=0,
+            output_tokens=0,
+            model='firecrawl-search',
+            request_id=None,
+            backend_url=firecrawl_base_url
+        )
+
+        return JSONResponse(content=result)
+
+    except requests.exceptions.HTTPError as e:
+        elapsed_time = time.time() - start_time
+        logger.error("=" * 80)
+        logger.error(f"❌ FIRECRAWL API ERROR")
+        logger.error(f"Duration: {elapsed_time:.2f}s")
+        logger.error(f"Error: {e}")
+        if e.response is not None:
+            logger.error(f"Response: {e.response.text}")
+        logger.error("=" * 80)
+        raise HTTPException(status_code=e.response.status_code if e.response else 500, detail=str(e))
+
+    except Exception as e:
+        elapsed_time = time.time() - start_time
+        logger.error("=" * 80)
+        logger.error(f"❌ INTERNAL ERROR")
+        logger.error(f"Duration: {elapsed_time:.2f}s")
+        logger.error(f"Error: {str(e)}")
+        logger.error("=" * 80)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+# ===== ElevenLabs Proxy Endpoints =====
+
+@app.post("/v1/elevenlabs/text-to-speech")
+async def elevenlabs_text_to_speech(
+    request: Request,
+    user_info: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    ElevenLabs text-to-speech endpoint - proxy to ElevenLabs API.
+
+    Converts text to speech using specified voice.
+
+    Request body:
+    {
+        "text": "Text to convert to speech",
+        "voice_id": "voice_id or use default",
+        "model_id": "eleven_monolingual_v1 (optional)",
+        "voice_settings": {
+            "stability": 0.5,
+            "similarity_boost": 0.5
+        }
+    }
+
+    Requires authentication via Bearer token.
+    """
+    start_time = time.time()
+
+    try:
+        # Get ElevenLabs configuration from environment
+        elevenlabs_api_key = os.getenv("ELEVENLABS_API_KEY")
+        elevenlabs_base_url = os.getenv("ELEVENLABS_BASE_URL", "https://api.elevenlabs.io/v1")
+
+        if not elevenlabs_api_key:
+            raise HTTPException(
+                status_code=503,
+                detail="ElevenLabs API key not configured"
+            )
+
+        # Parse request body
+        body = await request.json()
+        text = body.get("text")
+        voice_id = body.get("voice_id", "21m00Tcm4TlvDq8ikWAM")  # Default voice
+
+        if not text:
+            raise HTTPException(status_code=400, detail="Text is required")
+
+        logger.info("=" * 80)
+        logger.info(f"📥 ELEVENLABS TEXT-TO-SPEECH REQUEST")
+        logger.info(f"User: {user_info['username']} (ID: {user_info['user_id']})")
+        logger.info(f"Voice ID: {voice_id}")
+        logger.info(f"Text length: {len(text)} characters")
+        logger.info(f"Model: {body.get('model_id', 'default')}")
+
+        # Prepare request to ElevenLabs API
+        elevenlabs_url = f"{elevenlabs_base_url}/text-to-speech/{voice_id}"
+        headers = {
+            "xi-api-key": elevenlabs_api_key,
+            "Content-Type": "application/json"
+        }
+
+        # Build request body
+        tts_body = {
+            "text": text,
+            "model_id": body.get("model_id", "eleven_monolingual_v1")
+        }
+
+        if "voice_settings" in body:
+            tts_body["voice_settings"] = body["voice_settings"]
+
+        # Make request to ElevenLabs API
+        response = requests.post(
+            elevenlabs_url,
+            headers=headers,
+            json=tts_body,
+            timeout=config.timeout
+        )
+
+        response.raise_for_status()
+
+        elapsed_time = time.time() - start_time
+        logger.info(f"✅ ELEVENLABS TTS COMPLETED")
+        logger.info(f"Duration: {elapsed_time:.2f}s")
+        logger.info(f"Audio size: {len(response.content)} bytes")
+        logger.info("=" * 80)
+
+        # Track usage
+        user_manager.track_usage(
+            api_key_id=user_info['api_key_id'],
+            endpoint='/v1/elevenlabs/text-to-speech',
+            input_tokens=len(text),
+            output_tokens=0,
+            model='elevenlabs-tts',
+            request_id=None,
+            backend_url=elevenlabs_base_url
+        )
+
+        # Return audio data
+        return Response(
+            content=response.content,
+            media_type="audio/mpeg",
+            headers={
+                "Content-Disposition": f"attachment; filename=speech_{int(time.time())}.mp3"
+            }
+        )
+
+    except requests.exceptions.HTTPError as e:
+        elapsed_time = time.time() - start_time
+        logger.error("=" * 80)
+        logger.error(f"❌ ELEVENLABS API ERROR")
+        logger.error(f"Duration: {elapsed_time:.2f}s")
+        logger.error(f"Error: {e}")
+        if e.response is not None:
+            logger.error(f"Response: {e.response.text}")
+        logger.error("=" * 80)
+        raise HTTPException(status_code=e.response.status_code if e.response else 500, detail=str(e))
+
+    except Exception as e:
+        elapsed_time = time.time() - start_time
+        logger.error("=" * 80)
+        logger.error(f"❌ INTERNAL ERROR")
+        logger.error(f"Duration: {elapsed_time:.2f}s")
+        logger.error(f"Error: {str(e)}")
+        logger.error("=" * 80)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.post("/v1/elevenlabs/text-to-speech/stream")
+async def elevenlabs_text_to_speech_stream(
+    request: Request,
+    user_info: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    ElevenLabs text-to-speech streaming endpoint - proxy to ElevenLabs API.
+
+    Converts text to speech with streaming response.
+
+    Requires authentication via Bearer token.
+    """
+    start_time = time.time()
+
+    try:
+        # Get ElevenLabs configuration from environment
+        elevenlabs_api_key = os.getenv("ELEVENLABS_API_KEY")
+        elevenlabs_base_url = os.getenv("ELEVENLABS_BASE_URL", "https://api.elevenlabs.io/v1")
+
+        if not elevenlabs_api_key:
+            raise HTTPException(
+                status_code=503,
+                detail="ElevenLabs API key not configured"
+            )
+
+        # Parse request body
+        body = await request.json()
+        text = body.get("text")
+        voice_id = body.get("voice_id", "21m00Tcm4TlvDq8ikWAM")
+
+        if not text:
+            raise HTTPException(status_code=400, detail="Text is required")
+
+        logger.info("=" * 80)
+        logger.info(f"📥 ELEVENLABS TTS STREAMING REQUEST")
+        logger.info(f"User: {user_info['username']} (ID: {user_info['user_id']})")
+        logger.info(f"Voice ID: {voice_id}")
+        logger.info(f"Text length: {len(text)} characters")
+
+        # Prepare request to ElevenLabs API
+        elevenlabs_url = f"{elevenlabs_base_url}/text-to-speech/{voice_id}/stream"
+        headers = {
+            "xi-api-key": elevenlabs_api_key,
+            "Content-Type": "application/json"
+        }
+
+        tts_body = {
+            "text": text,
+            "model_id": body.get("model_id", "eleven_monolingual_v1")
+        }
+
+        if "voice_settings" in body:
+            tts_body["voice_settings"] = body["voice_settings"]
+
+        # Stream response
+        async def audio_stream():
+            """Generator for streaming audio."""
+            try:
+                with requests.post(
+                    elevenlabs_url,
+                    headers=headers,
+                    json=tts_body,
+                    stream=True,
+                    timeout=config.timeout
+                ) as response:
+                    response.raise_for_status()
+
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            yield chunk
+
+                elapsed_time = time.time() - start_time
+                logger.info(f"✅ ELEVENLABS TTS STREAMING COMPLETED")
+                logger.info(f"Duration: {elapsed_time:.2f}s")
+                logger.info("=" * 80)
+
+            except Exception as e:
+                logger.error(f"Streaming error: {e}")
+                raise
+
+        # Track usage
+        user_manager.track_usage(
+            api_key_id=user_info['api_key_id'],
+            endpoint='/v1/elevenlabs/text-to-speech/stream',
+            input_tokens=len(text),
+            output_tokens=0,
+            model='elevenlabs-tts-stream',
+            request_id=None,
+            backend_url=elevenlabs_base_url
+        )
+
+        return StreamingResponse(
+            audio_stream(),
+            media_type="audio/mpeg",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+            }
+        )
+
+    except Exception as e:
+        elapsed_time = time.time() - start_time
+        logger.error("=" * 80)
+        logger.error(f"❌ INTERNAL ERROR")
+        logger.error(f"Duration: {elapsed_time:.2f}s")
+        logger.error(f"Error: {str(e)}")
+        logger.error("=" * 80)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.websocket("/v1/elevenlabs/text-to-speech/websocket")
+async def elevenlabs_text_to_speech_websocket(
+    websocket: WebSocket,
+    voice_id: str = "21m00Tcm4TlvDq8ikWAM",
+    api_key: Optional[str] = None
+):
+    """
+    ElevenLabs text-to-speech WebSocket endpoint.
+
+    Real-time text-to-speech streaming via WebSocket.
+
+    Query parameters:
+    - voice_id: Voice ID (default: 21m00Tcm4TlvDq8ikWAM)
+    - api_key: User API key for authentication
+
+    WebSocket message format (send):
+    {
+        "text": "Text to convert",
+        "voice_settings": {...} (optional)
+    }
+
+    WebSocket message format (receive):
+    Binary audio data chunks
+    """
+    await websocket.accept()
+
+    try:
+        # Validate API key
+        if not api_key:
+            await websocket.send_json({"error": "API key required"})
+            await websocket.close()
+            return
+
+        user_info = user_manager.validate_api_key(api_key)
+        if not user_info:
+            await websocket.send_json({"error": "Invalid API key"})
+            await websocket.close()
+            return
+
+        # Get ElevenLabs configuration
+        elevenlabs_api_key = os.getenv("ELEVENLABS_API_KEY")
+        elevenlabs_ws_url = os.getenv("ELEVENLABS_WS_URL", "wss://api.elevenlabs.io/v1")
+
+        if not elevenlabs_api_key:
+            await websocket.send_json({"error": "ElevenLabs API not configured"})
+            await websocket.close()
+            return
+
+        logger.info(f"📥 ELEVENLABS TTS WebSocket connected for user: {user_info['username']}")
+
+        # Connect to ElevenLabs WebSocket
+        elevenlabs_ws_endpoint = f"{elevenlabs_ws_url}/text-to-speech/{voice_id}/stream-input?model_id=eleven_monolingual_v1"
+
+        async with websockets.connect(
+            elevenlabs_ws_endpoint,
+            extra_headers={"xi-api-key": elevenlabs_api_key}
+        ) as elevenlabs_ws:
+
+            # Handle bidirectional communication
+            async def receive_from_client():
+                """Receive text from client and forward to ElevenLabs"""
+                try:
+                    while True:
+                        data = await websocket.receive_text()
+                        message = json.loads(data)
+
+                        # Forward to ElevenLabs
+                        await elevenlabs_ws.send(json.dumps(message))
+
+                        # Track usage
+                        text = message.get("text", "")
+                        user_manager.track_usage(
+                            api_key_id=user_info['api_key_id'],
+                            endpoint='/v1/elevenlabs/text-to-speech/websocket',
+                            input_tokens=len(text),
+                            output_tokens=0,
+                            model='elevenlabs-tts-ws',
+                            request_id=None,
+                            backend_url=elevenlabs_ws_url
+                        )
+
+                except WebSocketDisconnect:
+                    logger.info(f"Client disconnected: {user_info['username']}")
+                except Exception as e:
+                    logger.error(f"Error receiving from client: {e}")
+
+            async def send_to_client():
+                """Receive audio from ElevenLabs and forward to client"""
+                try:
+                    async for message in elevenlabs_ws:
+                        if isinstance(message, bytes):
+                            # Audio data
+                            await websocket.send_bytes(message)
+                        else:
+                            # JSON message
+                            await websocket.send_text(message)
+
+                except Exception as e:
+                    logger.error(f"Error sending to client: {e}")
+
+            # Run both directions concurrently
+            await asyncio.gather(
+                receive_from_client(),
+                send_to_client()
+            )
+
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}")
+        try:
+            await websocket.send_json({"error": str(e)})
+        except:
+            pass
+    finally:
+        try:
+            await websocket.close()
+        except:
+            pass
+        logger.info("WebSocket connection closed")
+
+
+@app.post("/v1/elevenlabs/speech-to-text")
+async def elevenlabs_speech_to_text(
+    audio_file: UploadFile = File(...),
+    model: Optional[str] = Form("whisper-1"),
+    user_info: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    ElevenLabs speech-to-text endpoint - proxy to ElevenLabs API.
+
+    Transcribes audio to text.
+
+    Form data:
+    - audio_file: Audio file to transcribe
+    - model: Model to use (default: whisper-1)
+
+    Requires authentication via Bearer token.
+    """
+    start_time = time.time()
+
+    try:
+        # Get ElevenLabs configuration from environment
+        elevenlabs_api_key = os.getenv("ELEVENLABS_API_KEY")
+        elevenlabs_base_url = os.getenv("ELEVENLABS_BASE_URL", "https://api.elevenlabs.io/v1")
+
+        if not elevenlabs_api_key:
+            raise HTTPException(
+                status_code=503,
+                detail="ElevenLabs API key not configured"
+            )
+
+        logger.info("=" * 80)
+        logger.info(f"📥 ELEVENLABS SPEECH-TO-TEXT REQUEST")
+        logger.info(f"User: {user_info['username']} (ID: {user_info['user_id']})")
+        logger.info(f"File: {audio_file.filename}")
+        logger.info(f"Model: {model}")
+
+        # Read audio file
+        audio_data = await audio_file.read()
+
+        # Prepare request to ElevenLabs API
+        elevenlabs_url = f"{elevenlabs_base_url}/speech-to-text"
+        headers = {
+            "xi-api-key": elevenlabs_api_key
+        }
+
+        # Send as multipart/form-data
+        files = {
+            'file': (audio_file.filename, audio_data, audio_file.content_type)
+        }
+        data = {
+            'model_id': model
+        }
+
+        response = requests.post(
+            elevenlabs_url,
+            headers=headers,
+            files=files,
+            data=data,
+            timeout=config.timeout
+        )
+
+        response.raise_for_status()
+        result = response.json()
+
+        elapsed_time = time.time() - start_time
+        logger.info(f"✅ ELEVENLABS STT COMPLETED")
+        logger.info(f"Duration: {elapsed_time:.2f}s")
+        logger.info(f"Transcription length: {len(result.get('text', ''))} characters")
+        logger.info("=" * 80)
+
+        # Track usage
+        user_manager.track_usage(
+            api_key_id=user_info['api_key_id'],
+            endpoint='/v1/elevenlabs/speech-to-text',
+            input_tokens=0,
+            output_tokens=len(result.get('text', '')),
+            model='elevenlabs-stt',
+            request_id=None,
+            backend_url=elevenlabs_base_url
+        )
+
+        return JSONResponse(content=result)
+
+    except requests.exceptions.HTTPError as e:
+        elapsed_time = time.time() - start_time
+        logger.error("=" * 80)
+        logger.error(f"❌ ELEVENLABS API ERROR")
+        logger.error(f"Duration: {elapsed_time:.2f}s")
+        logger.error(f"Error: {e}")
+        if e.response is not None:
+            logger.error(f"Response: {e.response.text}")
+        logger.error("=" * 80)
+        raise HTTPException(status_code=e.response.status_code if e.response else 500, detail=str(e))
+
+    except Exception as e:
+        elapsed_time = time.time() - start_time
+        logger.error("=" * 80)
+        logger.error(f"❌ INTERNAL ERROR")
+        logger.error(f"Duration: {elapsed_time:.2f}s")
+        logger.error(f"Error: {str(e)}")
+        logger.error("=" * 80)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.websocket("/v1/elevenlabs/speech-to-text/websocket")
+async def elevenlabs_speech_to_text_websocket(
+    websocket: WebSocket,
+    api_key: Optional[str] = None,
+    model: str = "whisper-1"
+):
+    """
+    ElevenLabs speech-to-text WebSocket endpoint.
+
+    Real-time speech-to-text transcription via WebSocket.
+
+    Query parameters:
+    - api_key: User API key for authentication
+    - model: Model to use (default: whisper-1)
+
+    WebSocket message format (send):
+    Binary audio data chunks
+
+    WebSocket message format (receive):
+    {
+        "text": "Transcribed text",
+        "is_final": true/false
+    }
+    """
+    await websocket.accept()
+
+    try:
+        # Validate API key
+        if not api_key:
+            await websocket.send_json({"error": "API key required"})
+            await websocket.close()
+            return
+
+        user_info = user_manager.validate_api_key(api_key)
+        if not user_info:
+            await websocket.send_json({"error": "Invalid API key"})
+            await websocket.close()
+            return
+
+        # Get ElevenLabs configuration
+        elevenlabs_api_key = os.getenv("ELEVENLABS_API_KEY")
+        elevenlabs_ws_url = os.getenv("ELEVENLABS_WS_URL", "wss://api.elevenlabs.io/v1")
+
+        if not elevenlabs_api_key:
+            await websocket.send_json({"error": "ElevenLabs API not configured"})
+            await websocket.close()
+            return
+
+        logger.info(f"📥 ELEVENLABS STT WebSocket connected for user: {user_info['username']}")
+
+        # Connect to ElevenLabs WebSocket
+        elevenlabs_ws_endpoint = f"{elevenlabs_ws_url}/speech-to-text/stream?model={model}"
+
+        async with websockets.connect(
+            elevenlabs_ws_endpoint,
+            extra_headers={"xi-api-key": elevenlabs_api_key}
+        ) as elevenlabs_ws:
+
+            # Handle bidirectional communication
+            async def receive_from_client():
+                """Receive audio from client and forward to ElevenLabs"""
+                try:
+                    while True:
+                        data = await websocket.receive_bytes()
+
+                        # Forward audio to ElevenLabs
+                        await elevenlabs_ws.send(data)
+
+                except WebSocketDisconnect:
+                    logger.info(f"Client disconnected: {user_info['username']}")
+                except Exception as e:
+                    logger.error(f"Error receiving from client: {e}")
+
+            async def send_to_client():
+                """Receive transcriptions from ElevenLabs and forward to client"""
+                try:
+                    async for message in elevenlabs_ws:
+                        # Forward transcription to client
+                        await websocket.send_text(message)
+
+                        # Track usage
+                        try:
+                            result = json.loads(message)
+                            text = result.get("text", "")
+                            if result.get("is_final", False):
+                                user_manager.track_usage(
+                                    api_key_id=user_info['api_key_id'],
+                                    endpoint='/v1/elevenlabs/speech-to-text/websocket',
+                                    input_tokens=0,
+                                    output_tokens=len(text),
+                                    model='elevenlabs-stt-ws',
+                                    request_id=None,
+                                    backend_url=elevenlabs_ws_url
+                                )
+                        except:
+                            pass
+
+                except Exception as e:
+                    logger.error(f"Error sending to client: {e}")
+
+            # Run both directions concurrently
+            await asyncio.gather(
+                receive_from_client(),
+                send_to_client()
+            )
+
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}")
+        try:
+            await websocket.send_json({"error": str(e)})
+        except:
+            pass
+    finally:
+        try:
+            await websocket.close()
+        except:
+            pass
+        logger.info("WebSocket connection closed")
+
+
+# ===== SerpAPI Proxy Endpoints =====
+
+@app.get("/v1/serpapi/search")
+async def serpapi_search(
+    request: Request,
+    user_info: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    SerpAPI Google Search endpoint - proxy to SerpAPI.
+
+    Performs Google search and returns structured results.
+
+    Query parameters:
+    - q: Search query (required)
+    - location: Location for search (optional)
+    - gl: Country code (optional, e.g., "us", "uk")
+    - hl: Language code (optional, e.g., "en", "es")
+    - num: Number of results (optional, default: 10)
+    - start: Pagination start (optional)
+
+    Requires authentication via Bearer token.
+    """
+    start_time = time.time()
+
+    try:
+        # Get SerpAPI configuration from environment
+        serpapi_api_key = os.getenv("SERPAPI_API_KEY")
+        serpapi_base_url = os.getenv("SERPAPI_BASE_URL", "https://serpapi.com")
+
+        if not serpapi_api_key:
+            raise HTTPException(
+                status_code=503,
+                detail="SerpAPI key not configured"
+            )
+
+        # Get query parameters
+        query_params = dict(request.query_params)
+        query = query_params.get("q")
+
+        if not query:
+            raise HTTPException(status_code=400, detail="Query parameter 'q' is required")
+
+        logger.info("=" * 80)
+        logger.info(f"📥 SERPAPI GOOGLE SEARCH REQUEST")
+        logger.info(f"User: {user_info['username']} (ID: {user_info['user_id']})")
+        logger.info(f"Query: {query}")
+        logger.info(f"Parameters: {query_params}")
+
+        # Prepare request to SerpAPI
+        serpapi_url = f"{serpapi_base_url}/search"
+        params = {
+            "api_key": serpapi_api_key,
+            "engine": "google",
+            **query_params
+        }
+
+        response = requests.get(
+            serpapi_url,
+            params=params,
+            timeout=config.timeout
+        )
+
+        response.raise_for_status()
+        result = response.json()
+
+        elapsed_time = time.time() - start_time
+        logger.info(f"✅ SERPAPI SEARCH COMPLETED")
+        logger.info(f"Duration: {elapsed_time:.2f}s")
+        logger.info(f"Results: {len(result.get('organic_results', []))}")
+        logger.info("=" * 80)
+
+        # Track usage
+        user_manager.track_usage(
+            api_key_id=user_info['api_key_id'],
+            endpoint='/v1/serpapi/search',
+            input_tokens=len(query),
+            output_tokens=len(str(result)),
+            model='serpapi-google-search',
+            request_id=None,
+            backend_url=serpapi_base_url
+        )
+
+        return JSONResponse(content=result)
+
+    except requests.exceptions.HTTPError as e:
+        elapsed_time = time.time() - start_time
+        logger.error("=" * 80)
+        logger.error(f"❌ SERPAPI API ERROR")
+        logger.error(f"Duration: {elapsed_time:.2f}s")
+        logger.error(f"Error: {e}")
+        if e.response is not None:
+            logger.error(f"Response: {e.response.text}")
+        logger.error("=" * 80)
+        raise HTTPException(status_code=e.response.status_code if e.response else 500, detail=str(e))
+
+    except Exception as e:
+        elapsed_time = time.time() - start_time
+        logger.error("=" * 80)
+        logger.error(f"❌ INTERNAL ERROR")
+        logger.error(f"Duration: {elapsed_time:.2f}s")
+        logger.error(f"Error: {str(e)}")
+        logger.error("=" * 80)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.get("/v1/serpapi/images")
+async def serpapi_images(
+    request: Request,
+    user_info: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    SerpAPI Google Images endpoint - proxy to SerpAPI.
+
+    Searches Google Images and returns structured results.
+
+    Query parameters:
+    - q: Search query (required)
+    - location: Location for search (optional)
+    - gl: Country code (optional)
+    - hl: Language code (optional)
+    - num: Number of results (optional)
+
+    Requires authentication via Bearer token.
+    """
+    start_time = time.time()
+
+    try:
+        serpapi_api_key = os.getenv("SERPAPI_API_KEY")
+        serpapi_base_url = os.getenv("SERPAPI_BASE_URL", "https://serpapi.com")
+
+        if not serpapi_api_key:
+            raise HTTPException(status_code=503, detail="SerpAPI key not configured")
+
+        query_params = dict(request.query_params)
+        query = query_params.get("q")
+
+        if not query:
+            raise HTTPException(status_code=400, detail="Query parameter 'q' is required")
+
+        logger.info("=" * 80)
+        logger.info(f"📥 SERPAPI GOOGLE IMAGES REQUEST")
+        logger.info(f"User: {user_info['username']} (ID: {user_info['user_id']})")
+        logger.info(f"Query: {query}")
+
+        serpapi_url = f"{serpapi_base_url}/search"
+        params = {
+            "api_key": serpapi_api_key,
+            "engine": "google",
+            "tbm": "isch",  # Google Images
+            **query_params
+        }
+
+        response = requests.get(serpapi_url, params=params, timeout=config.timeout)
+        response.raise_for_status()
+        result = response.json()
+
+        elapsed_time = time.time() - start_time
+        logger.info(f"✅ SERPAPI IMAGES COMPLETED")
+        logger.info(f"Duration: {elapsed_time:.2f}s")
+        logger.info(f"Images: {len(result.get('images_results', []))}")
+        logger.info("=" * 80)
+
+        user_manager.track_usage(
+            api_key_id=user_info['api_key_id'],
+            endpoint='/v1/serpapi/images',
+            input_tokens=len(query),
+            output_tokens=len(str(result)),
+            model='serpapi-google-images',
+            request_id=None,
+            backend_url=serpapi_base_url
+        )
+
+        return JSONResponse(content=result)
+
+    except requests.exceptions.HTTPError as e:
+        elapsed_time = time.time() - start_time
+        logger.error(f"❌ SERPAPI IMAGES ERROR: {e}")
+        raise HTTPException(status_code=e.response.status_code if e.response else 500, detail=str(e))
+
+    except Exception as e:
+        elapsed_time = time.time() - start_time
+        logger.error(f"❌ INTERNAL ERROR: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.get("/v1/serpapi/news")
+async def serpapi_news(
+    request: Request,
+    user_info: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    SerpAPI Google News endpoint - proxy to SerpAPI.
+
+    Searches Google News and returns structured results.
+
+    Query parameters:
+    - q: Search query (required)
+    - location: Location for search (optional)
+    - gl: Country code (optional)
+    - hl: Language code (optional)
+    - num: Number of results (optional)
+
+    Requires authentication via Bearer token.
+    """
+    start_time = time.time()
+
+    try:
+        serpapi_api_key = os.getenv("SERPAPI_API_KEY")
+        serpapi_base_url = os.getenv("SERPAPI_BASE_URL", "https://serpapi.com")
+
+        if not serpapi_api_key:
+            raise HTTPException(status_code=503, detail="SerpAPI key not configured")
+
+        query_params = dict(request.query_params)
+        query = query_params.get("q")
+
+        if not query:
+            raise HTTPException(status_code=400, detail="Query parameter 'q' is required")
+
+        logger.info("=" * 80)
+        logger.info(f"📥 SERPAPI GOOGLE NEWS REQUEST")
+        logger.info(f"User: {user_info['username']} (ID: {user_info['user_id']})")
+        logger.info(f"Query: {query}")
+
+        serpapi_url = f"{serpapi_base_url}/search"
+        params = {
+            "api_key": serpapi_api_key,
+            "engine": "google",
+            "tbm": "nws",  # Google News
+            **query_params
+        }
+
+        response = requests.get(serpapi_url, params=params, timeout=config.timeout)
+        response.raise_for_status()
+        result = response.json()
+
+        elapsed_time = time.time() - start_time
+        logger.info(f"✅ SERPAPI NEWS COMPLETED")
+        logger.info(f"Duration: {elapsed_time:.2f}s")
+        logger.info(f"News articles: {len(result.get('news_results', []))}")
+        logger.info("=" * 80)
+
+        user_manager.track_usage(
+            api_key_id=user_info['api_key_id'],
+            endpoint='/v1/serpapi/news',
+            input_tokens=len(query),
+            output_tokens=len(str(result)),
+            model='serpapi-google-news',
+            request_id=None,
+            backend_url=serpapi_base_url
+        )
+
+        return JSONResponse(content=result)
+
+    except requests.exceptions.HTTPError as e:
+        elapsed_time = time.time() - start_time
+        logger.error(f"❌ SERPAPI NEWS ERROR: {e}")
+        raise HTTPException(status_code=e.response.status_code if e.response else 500, detail=str(e))
+
+    except Exception as e:
+        elapsed_time = time.time() - start_time
+        logger.error(f"❌ INTERNAL ERROR: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.get("/v1/serpapi/shopping")
+async def serpapi_shopping(
+    request: Request,
+    user_info: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    SerpAPI Google Shopping endpoint - proxy to SerpAPI.
+
+    Searches Google Shopping and returns product results.
+
+    Query parameters:
+    - q: Search query (required)
+    - location: Location for search (optional)
+    - gl: Country code (optional)
+    - hl: Language code (optional)
+    - num: Number of results (optional)
+
+    Requires authentication via Bearer token.
+    """
+    start_time = time.time()
+
+    try:
+        serpapi_api_key = os.getenv("SERPAPI_API_KEY")
+        serpapi_base_url = os.getenv("SERPAPI_BASE_URL", "https://serpapi.com")
+
+        if not serpapi_api_key:
+            raise HTTPException(status_code=503, detail="SerpAPI key not configured")
+
+        query_params = dict(request.query_params)
+        query = query_params.get("q")
+
+        if not query:
+            raise HTTPException(status_code=400, detail="Query parameter 'q' is required")
+
+        logger.info("=" * 80)
+        logger.info(f"📥 SERPAPI GOOGLE SHOPPING REQUEST")
+        logger.info(f"User: {user_info['username']} (ID: {user_info['user_id']})")
+        logger.info(f"Query: {query}")
+
+        serpapi_url = f"{serpapi_base_url}/search"
+        params = {
+            "api_key": serpapi_api_key,
+            "engine": "google",
+            "tbm": "shop",  # Google Shopping
+            **query_params
+        }
+
+        response = requests.get(serpapi_url, params=params, timeout=config.timeout)
+        response.raise_for_status()
+        result = response.json()
+
+        elapsed_time = time.time() - start_time
+        logger.info(f"✅ SERPAPI SHOPPING COMPLETED")
+        logger.info(f"Duration: {elapsed_time:.2f}s")
+        logger.info(f"Products: {len(result.get('shopping_results', []))}")
+        logger.info("=" * 80)
+
+        user_manager.track_usage(
+            api_key_id=user_info['api_key_id'],
+            endpoint='/v1/serpapi/shopping',
+            input_tokens=len(query),
+            output_tokens=len(str(result)),
+            model='serpapi-google-shopping',
+            request_id=None,
+            backend_url=serpapi_base_url
+        )
+
+        return JSONResponse(content=result)
+
+    except requests.exceptions.HTTPError as e:
+        elapsed_time = time.time() - start_time
+        logger.error(f"❌ SERPAPI SHOPPING ERROR: {e}")
+        raise HTTPException(status_code=e.response.status_code if e.response else 500, detail=str(e))
+
+    except Exception as e:
+        elapsed_time = time.time() - start_time
+        logger.error(f"❌ INTERNAL ERROR: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.get("/v1/serpapi/maps")
+async def serpapi_maps(
+    request: Request,
+    user_info: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    SerpAPI Google Maps endpoint - proxy to SerpAPI.
+
+    Searches Google Maps and returns local business results.
+
+    Query parameters:
+    - q: Search query (required)
+    - location: Location for search (optional but recommended)
+    - gl: Country code (optional)
+    - hl: Language code (optional)
+    - num: Number of results (optional)
+
+    Requires authentication via Bearer token.
+    """
+    start_time = time.time()
+
+    try:
+        serpapi_api_key = os.getenv("SERPAPI_API_KEY")
+        serpapi_base_url = os.getenv("SERPAPI_BASE_URL", "https://serpapi.com")
+
+        if not serpapi_api_key:
+            raise HTTPException(status_code=503, detail="SerpAPI key not configured")
+
+        query_params = dict(request.query_params)
+        query = query_params.get("q")
+
+        if not query:
+            raise HTTPException(status_code=400, detail="Query parameter 'q' is required")
+
+        logger.info("=" * 80)
+        logger.info(f"📥 SERPAPI GOOGLE MAPS REQUEST")
+        logger.info(f"User: {user_info['username']} (ID: {user_info['user_id']})")
+        logger.info(f"Query: {query}")
+
+        serpapi_url = f"{serpapi_base_url}/search"
+        params = {
+            "api_key": serpapi_api_key,
+            "engine": "google",
+            "tbm": "lcl",  # Google Maps/Local
+            **query_params
+        }
+
+        response = requests.get(serpapi_url, params=params, timeout=config.timeout)
+        response.raise_for_status()
+        result = response.json()
+
+        elapsed_time = time.time() - start_time
+        logger.info(f"✅ SERPAPI MAPS COMPLETED")
+        logger.info(f"Duration: {elapsed_time:.2f}s")
+        logger.info(f"Local results: {len(result.get('local_results', []))}")
+        logger.info("=" * 80)
+
+        user_manager.track_usage(
+            api_key_id=user_info['api_key_id'],
+            endpoint='/v1/serpapi/maps',
+            input_tokens=len(query),
+            output_tokens=len(str(result)),
+            model='serpapi-google-maps',
+            request_id=None,
+            backend_url=serpapi_base_url
+        )
+
+        return JSONResponse(content=result)
+
+    except requests.exceptions.HTTPError as e:
+        elapsed_time = time.time() - start_time
+        logger.error(f"❌ SERPAPI MAPS ERROR: {e}")
+        raise HTTPException(status_code=e.response.status_code if e.response else 500, detail=str(e))
+
+    except Exception as e:
+        elapsed_time = time.time() - start_time
+        logger.error(f"❌ INTERNAL ERROR: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.post("/v1/tavily/search")
+async def tavily_search(
+    request: Request,
+    user_info: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Tavily AI Search endpoint.
+
+    Proxies requests to Tavily Search API with comprehensive search capabilities.
+    """
+    start_time = time.time()
+
+    try:
+        # Get API key from environment
+        tavily_api_key = os.getenv("TAVILY_API_KEY")
+        if not tavily_api_key:
+            raise HTTPException(status_code=503, detail="Tavily API key not configured")
+
+        # Parse request body
+        body = await request.json()
+
+        # Validate required parameters
+        if "query" not in body:
+            raise HTTPException(status_code=400, detail="Missing required parameter: query")
+
+        query = body.get("query")
+
+        # Prepare request to Tavily API
+        tavily_url = "https://api.tavily.com/search"
+
+        # Build request payload with all parameters
+        payload = {
+            "api_key": tavily_api_key,
+            "query": query
+        }
+
+        # Add optional parameters if provided
+        optional_params = [
+            "auto_parameters", "topic", "search_depth", "chunks_per_source",
+            "max_results", "time_range", "start_date", "end_date",
+            "include_answer", "include_raw_content", "include_images",
+            "include_image_descriptions", "include_favicon",
+            "include_domains", "exclude_domains", "country"
+        ]
+
+        for param in optional_params:
+            if param in body:
+                payload[param] = body[param]
+
+        logger.info(f"🔍 TAVILY SEARCH: query='{query}' user={user_info.get('username')}")
+
+        # Make request to Tavily
+        response = requests.post(
+            tavily_url,
+            json=payload,
+            timeout=60
+        )
+        response.raise_for_status()
+
+        result = response.json()
+
+        elapsed_time = time.time() - start_time
+
+        # Track usage
+        user_manager.track_usage(
+            api_key_id=user_info['api_key_id'],
+            endpoint='/v1/tavily/search',
+            input_tokens=len(query),
+            output_tokens=len(str(result)),
+            model='tavily-search',
+            request_id=result.get('request_id'),
+            backend_url="https://api.tavily.com/search"
+        )
+
+        logger.info(f"✅ TAVILY SEARCH SUCCESS: {len(result.get('results', []))} results in {elapsed_time:.2f}s")
+
+        return result
+
+    except requests.exceptions.HTTPError as e:
+        elapsed_time = time.time() - start_time
+        error_detail = str(e)
+        if e.response is not None:
+            try:
+                error_body = e.response.json()
+                error_detail = f"{e.response.status_code} {e.response.reason}: {error_body}"
+            except:
+                error_detail = f"{e.response.status_code} {e.response.reason}"
+
+        logger.error(f"❌ TAVILY SEARCH ERROR: {error_detail}")
+        raise HTTPException(status_code=e.response.status_code if e.response else 500, detail=error_detail)
+
+    except Exception as e:
+        elapsed_time = time.time() - start_time
+        logger.error(f"❌ INTERNAL ERROR: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.post("/v1/tavily/extract")
+async def tavily_extract(
+    request: Request,
+    user_info: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Tavily Extract endpoint.
+
+    Proxies requests to Tavily Extract API for web content extraction.
+    """
+    start_time = time.time()
+
+    try:
+        # Get API key from environment
+        tavily_api_key = os.getenv("TAVILY_API_KEY")
+        if not tavily_api_key:
+            raise HTTPException(status_code=503, detail="Tavily API key not configured")
+
+        # Parse request body
+        body = await request.json()
+
+        # Validate required parameters
+        if "urls" not in body:
+            raise HTTPException(status_code=400, detail="Missing required parameter: urls")
+
+        urls = body.get("urls")
+        if isinstance(urls, str):
+            urls = [urls]
+
+        if not isinstance(urls, list) or len(urls) == 0:
+            raise HTTPException(status_code=400, detail="urls must be a non-empty string or list of strings")
+
+        if len(urls) > 20:
+            raise HTTPException(status_code=400, detail="Maximum 20 URLs allowed per request")
+
+        # Prepare request to Tavily API
+        tavily_url = "https://api.tavily.com/extract"
+
+        # Build request payload
+        payload = {
+            "api_key": tavily_api_key,
+            "urls": urls
+        }
+
+        # Add optional parameters if provided
+        optional_params = ["include_images", "include_favicon", "extract_depth", "format", "timeout"]
+
+        for param in optional_params:
+            if param in body:
+                payload[param] = body[param]
+
+        logger.info(f"📄 TAVILY EXTRACT: {len(urls)} URL(s) user={user_info.get('username')}")
+
+        # Make request to Tavily
+        response = requests.post(
+            tavily_url,
+            json=payload,
+            timeout=120  # Longer timeout for extraction
+        )
+        response.raise_for_status()
+
+        result = response.json()
+
+        elapsed_time = time.time() - start_time
+
+        # Track usage
+        user_manager.track_usage(
+            api_key_id=user_info['api_key_id'],
+            endpoint='/v1/tavily/extract',
+            input_tokens=len(urls),
+            output_tokens=len(str(result)),
+            model='tavily-extract',
+            request_id=result.get('request_id'),
+            backend_url="https://api.tavily.com/extract"
+        )
+
+        successful = len(result.get('results', []))
+        failed = len(result.get('failed_results', []))
+        logger.info(f"✅ TAVILY EXTRACT SUCCESS: {successful} extracted, {failed} failed in {elapsed_time:.2f}s")
+
+        return result
+
+    except requests.exceptions.HTTPError as e:
+        elapsed_time = time.time() - start_time
+        error_detail = str(e)
+        if e.response is not None:
+            try:
+                error_body = e.response.json()
+                error_detail = f"{e.response.status_code} {e.response.reason}: {error_body}"
+            except:
+                error_detail = f"{e.response.status_code} {e.response.reason}"
+
+        logger.error(f"❌ TAVILY EXTRACT ERROR: {error_detail}")
+        raise HTTPException(status_code=e.response.status_code if e.response else 500, detail=error_detail)
+
+    except Exception as e:
+        elapsed_time = time.time() - start_time
+        logger.error(f"❌ INTERNAL ERROR: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 if __name__ == "__main__":
