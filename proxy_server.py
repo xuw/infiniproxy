@@ -1971,8 +1971,9 @@ async def firecrawl_search(
         logger.info(f"Query: {query}")
         logger.info(f"Limit: {body.get('limit', 10)}")
 
-        # Forward request to Firecrawl API
-        firecrawl_url = f"{firecrawl_base_url}/search"
+        # Forward request to Firecrawl API v2 (search is v2-only feature)
+        # Use v2 endpoint explicitly since search doesn't exist in v1
+        firecrawl_url = "https://api.firecrawl.dev/v2/search"
         headers = {
             "Authorization": f"Bearer {firecrawl_api_key}",
             "Content-Type": "application/json"
@@ -2002,7 +2003,7 @@ async def firecrawl_search(
             output_tokens=0,
             model='firecrawl-search',
             request_id=None,
-            backend_url=firecrawl_base_url
+            backend_url="https://api.firecrawl.dev/v2"
         )
 
         return JSONResponse(content=result)

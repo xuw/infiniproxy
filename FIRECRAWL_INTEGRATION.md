@@ -134,6 +134,8 @@ curl -X GET http://localhost:8000/v1/firecrawl/crawl/status/238132ec-7bf0-4c77-b
 
 Search the web and return results.
 
+**Note**: This endpoint uses Firecrawl API v2 (the search feature is v2-only). Other endpoints use v1.
+
 **Request Body:**
 ```json
 {
