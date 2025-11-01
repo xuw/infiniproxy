@@ -5,15 +5,21 @@ InfiniProxy Environment Configuration (Python)
 This script configures environment variables to redirect API clients
 to use the InfiniProxy server instead of original API endpoints.
 
+Required Environment Variables:
+    AIAPI_URL - Proxy server URL (e.g., http://localhost:8000)
+    AIAPI_KEY - Proxy API key
+
 Usage:
-    python set_proxy_env.py                    # Use localhost (default)
-    python set_proxy_env.py <host>             # Use custom host
+    export AIAPI_URL=http://localhost:8000
+    export AIAPI_KEY=your-api-key-here
+    python set_proxy_env.py                    # Print summary
     python set_proxy_env.py --export           # Print export statements
     python set_proxy_env.py --json             # Print JSON format
 
 Examples:
+    export AIAPI_URL=http://localhost:8000
+    export AIAPI_KEY=sk-abc123...
     python set_proxy_env.py
-    python set_proxy_env.py api.example.com
     python set_proxy_env.py --export > /tmp/proxy_env.sh
     source /tmp/proxy_env.sh
 """
@@ -23,16 +29,19 @@ import sys
 import json
 
 
-def get_proxy_config(host=None):
-    """Get proxy configuration."""
-    proxy_host = host or os.getenv("INFINIPROXY_HOST", "localhost:8000")
-    proxy_api_key = os.getenv("INFINIPROXY_API_KEY", "sk-c8c5cc28a0bdc06b1de7de952f9bb3e05df74b5a40d1737c7bbe3d3f90f2f789")
+def get_proxy_config():
+    """Get proxy configuration from environment variables."""
+    proxy_url = os.getenv("AIAPI_URL", "http://localhost:8000")
+    proxy_api_key = os.getenv("AIAPI_KEY")
 
-    # Determine protocol
-    if proxy_host.startswith("localhost") or proxy_host.startswith("127.0.0.1"):
-        proxy_url = f"http://{proxy_host}"
-    else:
-        proxy_url = f"https://{proxy_host}"
+    # Check if API key is set
+    if not proxy_api_key:
+        print("❌ Error: AIAPI_KEY environment variable is not set", file=sys.stderr)
+        print("", file=sys.stderr)
+        print("Please set your API key:", file=sys.stderr)
+        print("  export AIAPI_KEY=your-api-key-here", file=sys.stderr)
+        print("  python set_proxy_env.py", file=sys.stderr)
+        sys.exit(1)
 
     return {
         "proxy_url": proxy_url,
@@ -132,17 +141,16 @@ def print_summary(config):
     print("=" * 50)
 
 
-def configure_proxy(host=None):
+def configure_proxy():
     """
     Configure environment for InfiniProxy (for import use).
 
-    Args:
-        host: Optional proxy host (default: localhost:8000)
+    Reads configuration from AIAPI_URL and AIAPI_KEY environment variables.
 
     Returns:
         dict: Configuration with proxy_url, proxy_api_key, and env_vars
     """
-    config = get_proxy_config(host)
+    config = get_proxy_config()
     set_environment(config)
     return config
 
@@ -150,7 +158,6 @@ def configure_proxy(host=None):
 def main():
     """Main entry point."""
     # Parse arguments
-    host = None
     output_format = "summary"
 
     for arg in sys.argv[1:]:
@@ -161,11 +168,9 @@ def main():
         elif arg in ["-h", "--help"]:
             print(__doc__)
             sys.exit(0)
-        elif not arg.startswith("-"):
-            host = arg
 
     # Get configuration
-    config = get_proxy_config(host)
+    config = get_proxy_config()
 
     # Set environment in current process
     set_environment(config)

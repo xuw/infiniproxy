@@ -4,6 +4,15 @@ Test script to verify proxy client configuration.
 
 This script demonstrates how to use the proxy configuration
 with various API clients and libraries.
+
+Required Environment Variables:
+    AIAPI_URL - Proxy server URL (e.g., http://localhost:8000)
+    AIAPI_KEY - Proxy API key
+
+Usage:
+    export AIAPI_URL=http://localhost:8000
+    export AIAPI_KEY=your-api-key-here
+    python test_proxy_client_config.py
 """
 
 import os

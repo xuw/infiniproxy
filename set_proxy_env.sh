@@ -4,23 +4,32 @@
 # This script configures environment variables to redirect API clients
 # to use the InfiniProxy server instead of original API endpoints.
 #
+# Required Environment Variables:
+#   AIAPI_URL - Proxy server URL (e.g., http://localhost:8000)
+#   AIAPI_KEY - Proxy API key
+#
 # Usage:
-#   source set_proxy_env.sh          # Use localhost (default)
-#   source set_proxy_env.sh <host>   # Use custom host
+#   export AIAPI_URL=http://localhost:8000
+#   export AIAPI_KEY=your-api-key-here
+#   source set_proxy_env.sh
 #
 # Example:
-#   source set_proxy_env.sh                    # http://localhost:8000
-#   source set_proxy_env.sh api.example.com    # https://api.example.com
+#   export AIAPI_URL=http://localhost:8000
+#   export AIAPI_KEY=sk-abc123...
+#   source set_proxy_env.sh
 
-# Configuration
-PROXY_HOST="${1:-localhost:8000}"
-PROXY_API_KEY="${INFINIPROXY_API_KEY:-sk-c8c5cc28a0bdc06b1de7de952f9bb3e05df74b5a40d1737c7bbe3d3f90f2f789}"
+# Configuration from environment variables
+PROXY_URL="${AIAPI_URL:-http://localhost:8000}"
+PROXY_API_KEY="${AIAPI_KEY}"
 
-# Determine protocol (use https if not localhost)
-if [[ "$PROXY_HOST" == localhost* ]] || [[ "$PROXY_HOST" == 127.0.0.1* ]]; then
-    PROXY_URL="http://${PROXY_HOST}"
-else
-    PROXY_URL="https://${PROXY_HOST}"
+# Check if API key is set
+if [ -z "$PROXY_API_KEY" ]; then
+    echo "❌ Error: AIAPI_KEY environment variable is not set"
+    echo ""
+    echo "Please set your API key:"
+    echo "  export AIAPI_KEY=your-api-key-here"
+    echo "  source set_proxy_env.sh"
+    return 1 2>/dev/null || exit 1
 fi
 
 echo "=================================================="
