@@ -4,8 +4,10 @@
 
 **Date**: 2025-11-03
 **Image**: `harbor.ai.iiis.co:9443/xuw/infiniproxy:latest`
-**Digest**: `sha256:35e47a7faa8e90075034db8bd3f64ae752af48c128b5772819093885e1b0cf24`
+**Digest**: `sha256:ad79d323d74c662a95bec57e1e466d0f61b90d09ff7ead08b5511569e4577833` (AMD64)
 **Git Commit**: `cba7e11`
+**Platform**: linux/amd64
+**Status**: ✅ Successfully deployed to Kubernetes cluster (namespace: weixu)
 
 ## What's Included in This Release
 
@@ -194,3 +196,23 @@ b479354 Fix Firecrawl search endpoint to use v2 API
 ```
 
 **Full changelog**: https://github.com/xuw/infiniproxy/compare/b479354..cba7e11
+
+## Deployment Troubleshooting
+
+### Issue: Architecture Mismatch (exec format error)
+
+**Problem**: Initial deployment failed with `CrashLoopBackOff` - pod logs showed:
+```
+exec /usr/local/bin/uvicorn: exec format error
+```
+
+**Root Cause**: Docker image was built for ARM64 (Apple Silicon) instead of AMD64 (x86_64) architecture required by the Kubernetes cluster.
+
+**Resolution**:
+1. Rolled back failed deployment: `kubectl rollout undo deployment/infiniproxy -n weixu`
+2. Rebuilt image with correct platform: `docker buildx build --platform linux/amd64 -t harbor.ai.iiis.co:9443/xuw/infiniproxy:latest --push .`
+3. New digest: `sha256:ad79d323d74c662a95bec57e1e466d0f61b90d09ff7ead08b5511569e4577833`
+4. Restarted deployment: `kubectl rollout restart deployment/infiniproxy -n weixu`
+5. **Result**: ✅ Deployment successful, service healthy
+
+**Key Learning**: Always use `--platform linux/amd64` when building images for x86_64 Kubernetes clusters from Apple Silicon Macs.
