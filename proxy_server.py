@@ -2320,7 +2320,7 @@ async def elevenlabs_text_to_speech_websocket(
 
         async with websockets.connect(
             elevenlabs_ws_endpoint,
-            extra_headers={"xi-api-key": elevenlabs_api_key}
+            additional_headers={"xi-api-key": elevenlabs_api_key}
         ) as elevenlabs_ws:
 
             # Handle bidirectional communication
@@ -2544,7 +2544,7 @@ async def elevenlabs_speech_to_text_websocket(
 
         async with websockets.connect(
             elevenlabs_ws_endpoint,
-            extra_headers={"xi-api-key": elevenlabs_api_key}
+            additional_headers={"xi-api-key": elevenlabs_api_key}
         ) as elevenlabs_ws:
 
             # Handle bidirectional communication
