@@ -4,31 +4,34 @@
 # This script configures environment variables to redirect API clients
 # to use the InfiniProxy server instead of original API endpoints.
 #
-# Required Environment Variables:
-#   AIAPI_URL - Proxy server URL (e.g., http://localhost:8000)
-#   AIAPI_KEY - Proxy API key
+# Environment Variables (either set works):
+#   AIAPI_URL or INFINIPROXY_URL - Proxy server URL (e.g., http://localhost:8000)
+#   AIAPI_KEY or INFINIPROXY_API_KEY - Proxy API key
 #
 # Usage:
 #   export AIAPI_URL=http://localhost:8000
 #   export AIAPI_KEY=your-api-key-here
 #   source set_proxy_env.sh
 #
-# Example:
-#   export AIAPI_URL=http://localhost:8000
-#   export AIAPI_KEY=sk-abc123...
+# Or (backward compatible):
+#   export INFINIPROXY_URL=http://localhost:8000
+#   export INFINIPROXY_API_KEY=your-api-key-here
 #   source set_proxy_env.sh
 
-# Configuration from environment variables
-PROXY_URL="${AIAPI_URL:-http://localhost:8000}"
-PROXY_API_KEY="${AIAPI_KEY}"
+# Configuration from environment variables (prefer AIAPI_* over INFINIPROXY_*)
+PROXY_URL="${AIAPI_URL:-${INFINIPROXY_URL:-http://localhost:8000}}"
+PROXY_API_KEY="${AIAPI_KEY:-${INFINIPROXY_API_KEY}}"
 
 # Check if API key is set
 if [ -z "$PROXY_API_KEY" ]; then
-    echo "❌ Error: AIAPI_KEY environment variable is not set"
+    echo "❌ Error: API key environment variable is not set"
     echo ""
-    echo "Please set your API key:"
+    echo "Please set your API key using either:"
     echo "  export AIAPI_KEY=your-api-key-here"
-    echo "  source set_proxy_env.sh"
+    echo "  OR"
+    echo "  export INFINIPROXY_API_KEY=your-api-key-here"
+    echo ""
+    echo "Then run: source set_proxy_env.sh"
     return 1 2>/dev/null || exit 1
 fi
 
@@ -114,16 +117,8 @@ echo "✅ SerpAPI:"
 echo "   SERPAPI_BASE_URL=$SERPAPI_BASE_URL"
 echo "   SERPAPI_API_KEY=${SERPAPI_API_KEY:0:20}..."
 
-# ============================================================================
-# Generic Proxy Configuration (for manual use)
-# ============================================================================
-export INFINIPROXY_URL="$PROXY_URL"
-export INFINIPROXY_API_KEY="$PROXY_API_KEY"
-
-echo ""
-echo "✅ Generic Proxy:"
-echo "   INFINIPROXY_URL=$INFINIPROXY_URL"
-echo "   INFINIPROXY_API_KEY=${INFINIPROXY_API_KEY:0:20}..."
+# Note: No longer exporting INFINIPROXY_URL/INFINIPROXY_API_KEY
+# These can be set directly as input variables if needed
 
 # ============================================================================
 # Summary

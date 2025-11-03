@@ -5,9 +5,9 @@ InfiniProxy Environment Configuration (Python)
 This script configures environment variables to redirect API clients
 to use the InfiniProxy server instead of original API endpoints.
 
-Required Environment Variables:
-    AIAPI_URL - Proxy server URL (e.g., http://localhost:8000)
-    AIAPI_KEY - Proxy API key
+Environment Variables (either set works):
+    AIAPI_URL or INFINIPROXY_URL - Proxy server URL (e.g., http://localhost:8000)
+    AIAPI_KEY or INFINIPROXY_API_KEY - Proxy API key
 
 Usage:
     export AIAPI_URL=http://localhost:8000
@@ -15,6 +15,11 @@ Usage:
     python set_proxy_env.py                    # Print summary
     python set_proxy_env.py --export           # Print export statements
     python set_proxy_env.py --json             # Print JSON format
+
+Or (backward compatible):
+    export INFINIPROXY_URL=http://localhost:8000
+    export INFINIPROXY_API_KEY=your-api-key-here
+    python set_proxy_env.py
 
 Examples:
     export AIAPI_URL=http://localhost:8000
@@ -31,16 +36,20 @@ import json
 
 def get_proxy_config():
     """Get proxy configuration from environment variables."""
-    proxy_url = os.getenv("AIAPI_URL", "http://localhost:8000")
-    proxy_api_key = os.getenv("AIAPI_KEY")
+    # Prefer AIAPI_* over INFINIPROXY_* for backward compatibility
+    proxy_url = os.getenv("AIAPI_URL") or os.getenv("INFINIPROXY_URL") or "http://localhost:8000"
+    proxy_api_key = os.getenv("AIAPI_KEY") or os.getenv("INFINIPROXY_API_KEY")
 
     # Check if API key is set
     if not proxy_api_key:
-        print("❌ Error: AIAPI_KEY environment variable is not set", file=sys.stderr)
+        print("❌ Error: API key environment variable is not set", file=sys.stderr)
         print("", file=sys.stderr)
-        print("Please set your API key:", file=sys.stderr)
+        print("Please set your API key using either:", file=sys.stderr)
         print("  export AIAPI_KEY=your-api-key-here", file=sys.stderr)
-        print("  python set_proxy_env.py", file=sys.stderr)
+        print("  OR", file=sys.stderr)
+        print("  export INFINIPROXY_API_KEY=your-api-key-here", file=sys.stderr)
+        print("", file=sys.stderr)
+        print("Then run: python set_proxy_env.py", file=sys.stderr)
         sys.exit(1)
 
     return {
@@ -76,10 +85,6 @@ def get_proxy_config():
             # SerpAPI
             "SERPAPI_BASE_URL": f"{proxy_url}/v1/serpapi",
             "SERPAPI_API_KEY": proxy_api_key,
-
-            # Generic Proxy
-            "INFINIPROXY_URL": proxy_url,
-            "INFINIPROXY_API_KEY": proxy_api_key,
         }
     }
 

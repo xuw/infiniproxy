@@ -126,11 +126,15 @@ def test_requests_configuration():
     try:
         import requests
 
-        proxy_url = os.getenv("INFINIPROXY_URL")
-        api_key = os.getenv("INFINIPROXY_API_KEY")
+        # Get proxy URL from either AIAPI_URL or INFINIPROXY_URL
+        proxy_url = os.getenv("AIAPI_URL") or os.getenv("INFINIPROXY_URL") or "http://localhost:8000"
+        api_key = os.getenv("AIAPI_KEY") or os.getenv("INFINIPROXY_API_KEY")
 
         print(f"Proxy URL: {proxy_url}")
-        print(f"API Key: {api_key[:20]}...")
+        if api_key:
+            print(f"API Key: {api_key[:20]}...")
+        else:
+            print("API Key: Not set")
         print()
 
         # Test health endpoint
@@ -167,8 +171,9 @@ def test_curl_command_generation():
     print("TEST 5: cURL Command Generation")
     print("=" * 60)
 
-    proxy_url = os.getenv("INFINIPROXY_URL")
-    api_key = os.getenv("INFINIPROXY_API_KEY")
+    # Get proxy URL from either AIAPI_URL or INFINIPROXY_URL
+    proxy_url = os.getenv("AIAPI_URL") or os.getenv("INFINIPROXY_URL") or "http://localhost:8000"
+    api_key = os.getenv("AIAPI_KEY") or os.getenv("INFINIPROXY_API_KEY") or "your-api-key"
 
     commands = {
         "Health Check": f'curl {proxy_url}/health',
