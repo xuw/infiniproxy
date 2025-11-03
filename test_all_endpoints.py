@@ -154,10 +154,12 @@ def test_firecrawl_search():
         if response.status_code == 200:
             data = response.json()
             print(f"Success: {data.get('success')}")
-            if data.get('data'):
-                print(f"Results count: {len(data['data'])}")
-                if data['data']:
-                    print(f"First result: {data['data'][0].get('title', 'N/A')}")
+            # Firecrawl v2 API returns data nested under data.web
+            if data.get('data', {}).get('web'):
+                results = data['data']['web']
+                print(f"Results count: {len(results)}")
+                if results:
+                    print(f"First result: {results[0].get('title', 'N/A')}")
             return True
         else:
             print(f"Response: {response.text}")
